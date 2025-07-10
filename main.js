@@ -305,8 +305,8 @@ async function saveSettings() {
 }
 
 function searchAndRender() {
-    const searchTerm = getEl('searchInput').value;
-    renderUI();
+    // This function is now a placeholder. The actual search logic is triggered by the search button.
+    renderUI(); 
 }
 
 function clearFilters() {
@@ -1738,6 +1738,12 @@ document.addEventListener('DOMContentLoaded', function () {
     const userInfoDiv = getEl('user-info');
     const userEmailSpan = getEl('user-email');
 
+    // Auth Event Listeners
+    getEl('login-btn').addEventListener('click', handleSignIn);
+    getEl('google-login-btn').addEventListener('click', handleGoogleSignIn);
+    getEl('signup-btn').addEventListener('click', handleSignUp);
+    getEl('logout-btn').addEventListener('click', handleSignOut);
+
     auth.onAuthStateChanged(async (user) => {
         if (user) {
             // User is signed in.
@@ -1756,6 +1762,10 @@ document.addEventListener('DOMContentLoaded', function () {
             appContainer.classList.remove('hidden');
             
             adjustUiForRole(appState.currentUser.role);
+            
+            // Add other event listeners only after user is logged in and UI is visible
+            initializeEventListeners();
+            
             await initializeAppForUser();
             checkFiles();
             renderUnslottedReport();
@@ -1769,14 +1779,9 @@ document.addEventListener('DOMContentLoaded', function () {
             userInfoDiv.classList.add('hidden');
         }
     });
+});
 
-    // Auth Event Listeners
-    getEl('login-btn').addEventListener('click', handleSignIn);
-    getEl('google-login-btn').addEventListener('click', handleGoogleSignIn);
-    getEl('signup-btn').addEventListener('click', handleSignUp);
-    getEl('logout-btn').addEventListener('click', handleSignOut);
-
-
+function initializeEventListeners() {
     // Event Listeners
     getEl('prevSlottingFile').addEventListener('change', (e) => handleFileChange(e, 'prevSlottingFileName'));
     getEl('inventoryFile').addEventListener('change', (e) => handleMultiFileChange(e, 'inventoryFileNames', 'clearInventoryBtn'));
@@ -1888,6 +1893,5 @@ document.addEventListener('DOMContentLoaded', function () {
             settingsModal.classList.remove('visible');
         }
     });
-});
+}
 // --- END: Main Execution ---
-
