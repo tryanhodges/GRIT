@@ -223,10 +223,10 @@
                                     <a href="#" id="poTemplateBtn" class="block px-4 py-2 text-sm text-indigo-600 hover:bg-gray-100">PO</a>
                                 </div>
                             </div>
-                             <button id="open-user-management-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600 manager-only">
+                             <button id="open-user-management-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600 manager-only hidden">
                                 <span class="material-symbols-outlined">manage_accounts</span>
                             </button>
-                             <button id="open-settings-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600">
+                             <button id="open-settings-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600 manager-only hidden">
                                 <span class="material-symbols-outlined">settings</span>
                             </button>
                         </div>
@@ -237,12 +237,12 @@
                 <div class="flex items-center border-b border-gray-200">
                     <button class="tab-button active" data-tab="setup">Setup & Slot</button>
                     <button class="tab-button" data-tab="receiving">PO Receiving</button>
-                    <button class="tab-button" data-tab="cushion">Cushion Sorting</button>
+                    <button class="tab-button manager-only hidden" data-tab="cushion">Cushion Sorting</button>
                     <button class="tab-button" data-tab="unslotted">
                         Unslotted Items
                         <span id="unslotted-badge" class="hidden ml-2 bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full"></span>
                     </button>
-                    <button class="tab-button manager-only" data-tab="exclusions">Item Exclusions</button>
+                    <button class="tab-button manager-only hidden" data-tab="exclusions">Item Exclusions</button>
                 </div>
 
                 <div class="pt-6">
@@ -301,7 +301,7 @@
                     </div>
 
                     <!-- Tab 3: Cushion Sorting -->
-                    <div id="tab-cushion" class="tab-content">
+                    <div id="tab-cushion" class="tab-content manager-only hidden">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                             <div>
                                 <h3 class="section-title">Cushion Level Priority</h3>
@@ -338,7 +338,7 @@
                     </div>
 
                     <!-- Tab 5: Item Exclusions -->
-                    <div id="tab-exclusions" class="tab-content manager-only">
+                    <div id="tab-exclusions" class="tab-content manager-only hidden">
                          <h2 class="section-title">Item Description Exclusions</h2>
                          <p class="text-sm text-gray-600 mb-4">Add keywords to exclude items from being slotted (e.g., "Apparel", "Socks"). This is case-insensitive.</p>
                          <div class="flex gap-2 mb-4">

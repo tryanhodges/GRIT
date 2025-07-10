@@ -11,6 +11,7 @@ const firebaseConfig = {
   measurementId: "G-LJ16FE68W4"
 };
 
+
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
@@ -1865,16 +1866,22 @@ function handleSignOut() {
 }
 
 function adjustUiForRole(role) {
-    const managerOnlyElements = document.querySelectorAll('.manager-only');
-    if (role === 'manager') {
-        managerOnlyElements.forEach(el => el.classList.remove('hidden'));
-    } else {
-        managerOnlyElements.forEach(el => el.classList.add('hidden'));
-    }
-    // Disable certain buttons if not a manager
-    getEl('slotBtn').disabled = role !== 'manager';
-    getEl('add-cushion-level-btn').disabled = role !== 'manager';
-    getEl('add-exclusion-btn').disabled = role !== 'manager';
+    const isManager = role === 'manager';
+    
+    // Toggle visibility of all manager-only elements
+    document.querySelectorAll('.manager-only').forEach(el => {
+        el.classList.toggle('hidden', !isManager);
+    });
+
+    // Explicitly enable/disable controls based on role
+    getEl('slotBtn').disabled = !isManager;
+    getEl('add-cushion-level-btn').disabled = !isManager;
+    getEl('add-exclusion-btn').disabled = !isManager;
+    getEl('save-settings-btn').disabled = !isManager;
+
+    // Disable settings inputs for non-managers
+    const settingsInputs = document.querySelectorAll('#settings-modal input, #settings-modal select');
+    settingsInputs.forEach(input => input.disabled = !isManager);
 }
 
 async function renderUserManagementModal() {
@@ -2101,5 +2108,4 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 });
 // --- END: Main Execution ---
-
 
