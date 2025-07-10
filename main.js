@@ -126,13 +126,13 @@ async function loadDataFromFirestore(collection, docId) {
     }
 }
 
-async function clearCollection(collectionName) {
-    const snapshot = await db.collection(collectionName).get();
-    const batch = db.batch();
-    snapshot.docs.forEach(doc => {
-        batch.delete(doc.ref);
-    });
-    await batch.commit();
+async function deleteDocument(collection, docId) {
+    try {
+        await db.collection(collection).doc(docId).delete();
+    } catch (e) {
+        console.error("Error deleting document:", e);
+        showToast("Error deleting data from the cloud.", "error");
+    }
 }
 
 
@@ -175,29 +175,30 @@ function clearLoadedPOs() {
     showToast("Loaded PO files cleared.", "info");
 }
 
-async function clearAllPOData() {
-    showConfirmationModal('Clear All POs?', 'Are you sure you want to clear ALL saved PO records from the database? This action cannot be undone.', async () => {
-        setLoading(true, 'Deleting POs...');
-        try {
-            await clearCollection('purchaseOrders');
-            appState.loadedPOs = {};
-            renderPODetails();
-            showToast("All PO records cleared from the database.", "success");
-        } catch (e) {
-            showToast("Error clearing POs.", "error");
-        } finally {
-            setLoading(false);
-        }
-    });
+async function initializeAppForUser() {
+    setLoading(true, "Loading sites...");
+    await loadSites();
+    const siteSelector = getEl('site-selector');
+    if (appState.sites.length > 0) {
+        const siteToSelect = appState.currentUser.homeSiteId || appState.sites[0].id;
+        siteSelector.value = siteToSelect;
+        appState.selectedSiteId = siteToSelect;
+        await initializeFromStorage();
+    } else {
+        getEl('overviewSubtitle').textContent = 'No sites found. A manager must create a site to begin.';
+        updateUiForSiteSelection();
+    }
+    setLoading(false);
 }
 
 async function initializeFromStorage() {
     if (!appState.selectedSiteId) {
         console.error("No site selected, cannot load data.");
         getEl('overviewSubtitle').textContent = 'Please select a site to begin.';
+        updateUiForSiteSelection();
         return;
     }
-    setLoading(true, "Loading data for selected site...");
+    setLoading(true, `Loading data for ${appState.selectedSiteId}...`);
     
     // Reset local state before loading new site data
     appState.finalSlottedData = {};
@@ -255,6 +256,7 @@ async function initializeFromStorage() {
     renderMetricsPanel();
     renderUnslottedReport();
     updateFilterDropdowns();
+    updateUiForSiteSelection();
     setLoading(false);
 }
 
@@ -300,23 +302,6 @@ async function saveSettings() {
     renderUI();
     renderMetricsPanel();
     setLoading(false);
-}
-
-async function clearAllStoredData() {
-    showConfirmationModal('Clear All Settings?', 'Are you sure you want to clear all saved Settings and Exclusions from the database? This action cannot be undone.', async () => {
-        setLoading(true, 'Deleting settings...');
-        try {
-            await db.collection('configs').doc('mainSettings').delete();
-            await db.collection('configs').doc('cushionData').delete();
-            await db.collection('configs').doc('exclusionKeywords').delete();
-            showToast("All saved settings and exclusions cleared from the database. Reloading...", "success");
-            setTimeout(() => location.reload(), 1500);
-        } catch(e) {
-            showToast("Error clearing settings.", "error");
-        } finally {
-            setLoading(false);
-        }
-    });
 }
 
 function searchAndRender() {
@@ -1647,7 +1632,7 @@ document.addEventListener('DOMContentLoaded', function () {
             appContainer.classList.remove('hidden');
             
             adjustUiForRole(appState.currentUser.role);
-            await initializeFromStorage();
+            await initializeAppForUser();
             checkFiles();
             renderUnslottedReport();
             setLoading(false);
@@ -1754,7 +1739,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // Site Management Modal Logic
     const siteManagementModal = getEl('site-management-modal');
     getEl('open-site-management-btn').addEventListener('click', () => {
-        // renderSiteManagementModal(); // We'll need to create this function
+        renderSiteManagementModal();
         siteManagementModal.classList.add('visible');
     });
     getEl('close-site-management-btn').addEventListener('click', () => siteManagementModal.classList.remove('visible'));
@@ -1762,6 +1747,12 @@ document.addEventListener('DOMContentLoaded', function () {
         if (e.target === siteManagementModal) {
             siteManagementModal.classList.remove('visible');
         }
+    });
+    getEl('create-site-btn').addEventListener('click', createNewSite);
+    getEl('set-home-site-btn').addEventListener('click', setHomeSite);
+    getEl('site-selector').addEventListener('change', (e) => {
+        appState.selectedSiteId = e.target.value;
+        initializeFromStorage();
     });
 
 
@@ -1778,3 +1769,4 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 });
 // --- END: Main Execution ---
+
