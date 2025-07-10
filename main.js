@@ -14,6 +14,7 @@ const firebaseConfig = {
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+const auth = firebase.auth();
 // --- END: Firebase Configuration ---
 
 
@@ -29,6 +30,11 @@ const appState = {
     selectedRackId: 1,
     brandChart: null,
     userInitials: '',
+    currentUser: {
+        uid: null,
+        email: null,
+        role: null, // 'manager' or 'salesfloor'
+    },
     colorMap: {
         'M': { name: 'Men', onHand: '#5468C1', po: '#a9b3e0' },
         'W': { name: 'Women', onHand: '#f846f0', po: '#fbc2f8' },
@@ -43,7 +49,7 @@ const getEl = (id) => document.getElementById(id);
 
 // --- START: All Function Declarations ---
 
-// --- UI Feedback (Toast and Loader) ---
+// --- UI Feedback (Toast, Loader, Modal) ---
 function showToast(message, type = 'info') {
     const toastContainer = getEl('toast-container');
     const toast = document.createElement('div');
@@ -66,10 +72,35 @@ function setLoading(isLoading, message = '') {
     getEl('loading-message').textContent = message;
 }
 
+function showConfirmationModal(title, message, onConfirm) {
+    const modal = getEl('confirmation-modal');
+    getEl('confirmation-title').textContent = title;
+    getEl('confirmation-message').textContent = message;
+    modal.classList.add('visible');
+
+    const confirmBtn = getEl('confirmation-confirm-btn');
+    const cancelBtn = getEl('confirmation-cancel-btn');
+
+    const confirmHandler = () => {
+        onConfirm();
+        closeModal();
+    };
+
+    const closeModal = () => {
+        modal.classList.remove('visible');
+        confirmBtn.removeEventListener('click', confirmHandler);
+        cancelBtn.removeEventListener('click', closeModal);
+    };
+
+    confirmBtn.addEventListener('click', confirmHandler);
+    cancelBtn.addEventListener('click', closeModal);
+}
+
+
 // --- Firestore Data Functions ---
 async function saveDataToFirestore(collection, docId, data) {
     try {
-        await db.collection(collection).doc(docId).set(data);
+        await db.collection(collection).doc(docId).set(data, { merge: true });
     } catch (e) {
         console.error("Error saving to Firestore", e);
         showToast("Error saving data to the cloud.", "error");
@@ -140,7 +171,7 @@ function clearLoadedPOs() {
 }
 
 async function clearAllPOData() {
-    if (confirm("Are you sure you want to clear ALL saved PO records from the database? This action cannot be undone.")) {
+    showConfirmationModal('Clear All POs?', 'Are you sure you want to clear ALL saved PO records from the database? This action cannot be undone.', async () => {
         setLoading(true, 'Deleting POs...');
         try {
             await clearCollection('purchaseOrders');
@@ -152,7 +183,7 @@ async function clearAllPOData() {
         } finally {
             setLoading(false);
         }
-    }
+    });
 }
 
 async function initializeFromStorage() {
@@ -219,6 +250,10 @@ function updateColorState() {
 }
 
 async function saveSettings() {
+    if (appState.currentUser.role !== 'manager') {
+        showToast("You do not have permission to save settings.", "error");
+        return;
+    }
     setLoading(true, "Saving settings...");
     updateColorState();
     appState.userInitials = getEl('userInitials').value.toUpperCase();
@@ -243,7 +278,7 @@ async function saveSettings() {
 }
 
 async function clearAllStoredData() {
-    if (confirm("Are you sure you want to clear all saved Settings and Exclusions from the database? This cannot be undone.")) {
+    showConfirmationModal('Clear All Settings?', 'Are you sure you want to clear all saved Settings and Exclusions from the database? This action cannot be undone.', async () => {
         setLoading(true, 'Deleting settings...');
         try {
             await db.collection('configs').doc('mainSettings').delete();
@@ -256,7 +291,7 @@ async function clearAllStoredData() {
         } finally {
             setLoading(false);
         }
-    }
+    });
 }
 
 function searchAndRender() {
@@ -406,6 +441,10 @@ function resetSelect(selectEl, defaultText) {
 
 // --- Core Application Logic ---
 async function runSlottingProcess() {
+    if (appState.currentUser.role !== 'manager') {
+        showToast("You do not have permission to run the slotting process.", "error");
+        return;
+    }
     setLoading(true, 'Initializing...');
     await saveCushionData(); // Save any pending cushion changes before running
     await saveSettings(); // Save settings on run
@@ -992,7 +1031,11 @@ async function renderPODetails() {
 
     document.querySelectorAll('.receive-po-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
-            markPOAsReceived(e.currentTarget.dataset.poKey);
+            if (appState.currentUser.role === 'manager') {
+                markPOAsReceived(e.currentTarget.dataset.poKey);
+            } else {
+                showToast("You do not have permission to receive POs.", "error");
+            }
         });
     });
 }
@@ -1418,7 +1461,7 @@ async function addCushionLevel() {
         renderCushionUI();
         input.value = '';
         showToast(`Cushion level '${level}' added.`, 'success');
-    } else if (!level) {
+    } else if (!keyword) {
         showToast('Please enter a cushion level name.', 'error');
     } else {
         showToast(`'${level}' already exists.`, 'info');
@@ -1749,8 +1792,134 @@ function handleDrop(e) {
 }
 // --- END: Drag and Drop Handlers ---
 
+// --- START: Auth Functions ---
+function showAuthError(message) {
+    const errorDiv = getEl('auth-error');
+    errorDiv.textContent = message;
+    errorDiv.classList.remove('hidden');
+}
+
+function clearAuthError() {
+    getEl('auth-error').classList.add('hidden');
+}
+
+async function handleSignUp() {
+    clearAuthError();
+    const email = getEl('email').value;
+    const password = getEl('password').value;
+
+    if (!email || !password) {
+        showAuthError("Please enter both email and password.");
+        return;
+    }
+
+    setLoading(true, "Creating account...");
+    try {
+        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+        const user = userCredential.user;
+
+        // Check if this is the first user ever. If so, make them a manager.
+        const usersCollection = await db.collection('users').limit(1).get();
+        const role = usersCollection.empty ? 'manager' : 'salesfloor';
+
+        // Create a user profile document in Firestore
+        await db.collection('users').doc(user.uid).set({
+            email: user.email,
+            role: role,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        showToast(`Account created! You are a ${role}.`, 'success');
+
+    } catch (error) {
+        showAuthError(error.message);
+    } finally {
+        setLoading(false);
+    }
+}
+
+async function handleSignIn() {
+    clearAuthError();
+    const email = getEl('email').value;
+    const password = getEl('password').value;
+
+    if (!email || !password) {
+        showAuthError("Please enter both email and password.");
+        return;
+    }
+    
+    setLoading(true, "Logging in...");
+    try {
+        await auth.signInWithEmailAndPassword(email, password);
+        // onAuthStateChanged will handle the rest
+    } catch (error) {
+        showAuthError(error.message);
+    } finally {
+        setLoading(false);
+    }
+}
+
+function handleSignOut() {
+    auth.signOut();
+}
+
+function adjustUiForRole(role) {
+    const managerOnlyElements = document.querySelectorAll('.manager-only');
+    if (role === 'manager') {
+        managerOnlyElements.forEach(el => el.classList.remove('hidden'));
+    } else {
+        managerOnlyElements.forEach(el => el.classList.add('hidden'));
+    }
+    // Disable certain buttons if not a manager
+    getEl('slotBtn').disabled = role !== 'manager';
+    getEl('add-cushion-level-btn').disabled = role !== 'manager';
+    getEl('add-exclusion-btn').disabled = role !== 'manager';
+}
+
 // --- START: Main Execution ---
 document.addEventListener('DOMContentLoaded', function () {
+    const authContainer = getEl('auth-container');
+    const appContainer = getEl('app-container');
+    const userInfoDiv = getEl('user-info');
+    const userEmailSpan = getEl('user-email');
+
+    auth.onAuthStateChanged(async (user) => {
+        if (user) {
+            // User is signed in.
+            setLoading(true, 'Loading user data...');
+            const userDoc = await loadDataFromFirestore('users', user.uid);
+            
+            appState.currentUser.uid = user.uid;
+            appState.currentUser.email = user.email;
+            appState.currentUser.role = userDoc ? userDoc.role : 'salesfloor'; // Default to least privilege
+
+            userEmailSpan.textContent = user.email;
+            userInfoDiv.classList.remove('hidden');
+            
+            authContainer.classList.add('hidden');
+            appContainer.classList.remove('hidden');
+            
+            adjustUiForRole(appState.currentUser.role);
+            await initializeFromStorage();
+            checkFiles();
+            renderUnslottedReport();
+            setLoading(false);
+
+        } else {
+            // User is signed out.
+            appState.currentUser = { uid: null, email: null, role: null };
+            authContainer.classList.remove('hidden');
+            appContainer.classList.add('hidden');
+            userInfoDiv.classList.add('hidden');
+        }
+    });
+
+    // Auth Event Listeners
+    getEl('login-btn').addEventListener('click', handleSignIn);
+    getEl('signup-btn').addEventListener('click', handleSignUp);
+    getEl('logout-btn').addEventListener('click', handleSignOut);
+
+
     // Event Listeners
     getEl('prevSlottingFile').addEventListener('change', (e) => handleFileChange(e, 'prevSlottingFileName'));
     getEl('inventoryFile').addEventListener('change', (e) => handleMultiFileChange(e, 'inventoryFileNames', 'clearInventoryBtn'));
@@ -1833,9 +2002,6 @@ document.addEventListener('DOMContentLoaded', function () {
             settingsModal.classList.remove('visible');
         }
     });
-
-    initializeFromStorage();
-    checkFiles();
-    renderUnslottedReport();
 });
 // --- END: Main Execution ---
+
