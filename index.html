@@ -3,13 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Backroom Inventory Slotting System V6.1 (Web App)</title>
+    <title>GRIT Multi-Site V7.0</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Chart.js Library -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- PDF Generation Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
     <link rel="stylesheet" href="style.css">
@@ -66,11 +64,38 @@
     
     <!-- START: Main App Container (hidden by default) -->
     <div id="app-container" class="hidden">
+        <!-- START: Site Management Modal -->
+        <div id="site-management-modal" class="modal-overlay">
+            <div class="modal-content">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">Site Management</h2>
+                    <button id="close-site-management-btn" class="text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div>
+                        <h3 class="section-title">Existing Sites</h3>
+                        <div id="site-list-container" class="space-y-2 max-h-64 overflow-y-auto">
+                            <!-- Site list rendered here -->
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="section-title">Create New Site</h3>
+                        <div class="space-y-2">
+                            <label for="new-site-name" class="font-medium text-gray-700">New Site Name:</label>
+                            <input type="text" id="new-site-name" placeholder="e.g., Pinnacle-Rogers" class="w-full border-gray-300 rounded-md shadow-sm">
+                            <button id="create-site-btn" class="btn btn-primary w-full mt-2">Create Site</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- END: Site Management Modal -->
+
         <!-- START: Settings Modal -->
         <div id="settings-modal" class="modal-overlay">
             <div class="modal-content">
                 <div class="flex justify-between items-center mb-6">
-                    <h2 class="text-2xl font-bold text-gray-800">Settings</h2>
+                    <h2 class="text-2xl font-bold text-gray-800">Settings for <span id="settings-site-name" class="text-indigo-600"></span></h2>
                     <button id="close-settings-btn" class="text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
                 </div>
                 <div class="space-y-8">
@@ -145,17 +170,9 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="manager-only">
-                            <h3 class="section-title text-red-600 border-red-200">Danger Zone</h3>
-                            <div class="space-y-3 pt-2">
-                                <button id="clearAllPOsBtn" class="clear-storage-btn text-red-500 hover:text-red-700">Clear All PO Records</button>
-                                <br>
-                                <button id="clearStorageBtn" class="clear-storage-btn text-red-500 hover:text-red-700">Clear Saved Settings & Exclusions</button>
-                            </div>
-                        </div>
                     </div>
                     <div class="border-t pt-4 flex justify-end">
-                        <button id="save-settings-btn" class="btn btn-primary w-auto px-6">Save & Close</button>
+                        <button id="save-settings-btn" class="btn btn-primary w-auto px-6">Save Settings for this Site</button>
                     </div>
                 </div>
             </div>
@@ -181,8 +198,8 @@
             <div class="bg-white p-6 rounded-xl shadow-md mb-8">
                 <!-- START: Header with Logos -->
                 <div class="flex justify-between items-start mb-6">
-                    <div>
-                        <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-4">
+                        <div class="flex-shrink-0" style="width: 78px;">
                             <svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="78px" height="63px" version="1.0" shape-rendering="geometricPrecision" text-rendering="geometricPrecision" image-rendering="optimizeQuality" fill-rule="evenodd" clip-rule="evenodd"
                             viewBox="0 0 155 125"
                              xmlns:xlink="http://www.w3.org/1999/xlink">
@@ -203,7 +220,12 @@
                              </g>
                             </svg>
                         </div>
-                        <span class="text-lg font-semibold text-gray-400">V6.1</span>
+                        <div class="flex items-center gap-2">
+                            <select id="site-selector" class="border-gray-300 rounded-md shadow-sm"></select>
+                            <button id="set-home-site-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600" title="Set as Home Site">
+                                <span class="material-symbols-outlined">push_pin</span>
+                            </button>
+                        </div>
                     </div>
                     <div class="flex flex-col items-end">
                         <div class="flex-shrink-0" style="width: 100px;">
@@ -226,10 +248,13 @@
                                     <a href="#" id="poTemplateBtn" class="block px-4 py-2 text-sm text-indigo-600 hover:bg-gray-100">PO</a>
                                 </div>
                             </div>
-                             <button id="open-user-management-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600 manager-only hidden">
+                             <button id="open-site-management-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600 manager-only hidden" title="Manage Sites">
+                                <span class="material-symbols-outlined">store</span>
+                            </button>
+                             <button id="open-user-management-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600 manager-only hidden" title="Manage Users">
                                 <span class="material-symbols-outlined">manage_accounts</span>
                             </button>
-                             <button id="open-settings-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600 manager-only hidden">
+                             <button id="open-settings-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600 manager-only hidden" title="Site Settings">
                                 <span class="material-symbols-outlined">settings</span>
                             </button>
                         </div>
@@ -387,9 +412,9 @@
                     </div>
                 </div>
 
-                <div id="search-container" class="mb-4">
-                    <input type="text" id="searchInput" placeholder="Search by Brand, Model, Color, or Size..." class="w-full p-3 pl-4 pr-10 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
-                    <span id="searchClearBtn">&times;</span>
+                <div class="flex items-center gap-2 mb-4">
+                    <input type="text" id="searchInput" placeholder="Search all sites by Brand, Model, Color, or Size..." class="w-full p-3 pl-4 pr-10 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                    <button id="search-btn" class="btn btn-primary flex-shrink-0">Search</button>
                 </div>
                  <!-- START: Dropdown Filters -->
                 <div class="flex items-center gap-4 mb-6">
@@ -407,7 +432,7 @@
                 <!-- END: Dropdown Filters -->
             </div>
 
-            <p id="overviewSubtitle" class="text-gray-600 mt-1 mb-6">Upload inventory files to begin.</p>
+            <p id="overviewSubtitle" class="text-gray-600 mt-1 mb-6">Select a site to begin.</p>
             <div id="visualization-container"></div>
         </div>
     </div>
@@ -417,6 +442,7 @@
     <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-functions-compat.js"></script>
     
     <script src="main.js" defer></script>
 </body>

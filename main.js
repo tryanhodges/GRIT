@@ -11,15 +11,20 @@ const firebaseConfig = {
   measurementId: "G-LJ16FE68W4"
 };
 
+
+
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const auth = firebase.auth();
+const functions = firebase.functions();
 // --- END: Firebase Configuration ---
 
 
 // --- START: Application State and Constants ---
 const appState = {
+    sites: [],
+    selectedSiteId: null,
     finalSlottedData: {},
     unslottedItems: [],
     loadedPOs: {},
@@ -34,6 +39,7 @@ const appState = {
         uid: null,
         email: null,
         role: null, // 'manager' or 'salesfloor'
+        homeSiteId: null
     },
     colorMap: {
         'M': { name: 'Men', onHand: '#5468C1', po: '#a9b3e0' },
@@ -186,21 +192,30 @@ async function clearAllPOData() {
     });
 }
 
-async function initializeFromStorage() {
-    setLoading(true, "Loading data from cloud...");
-    const storedSettings = await loadDataFromFirestore('configs', 'mainSettings');
+async function initializeFromStorage(siteId) {
+    if (!siteId) {
+        console.error("No site selected, cannot load data.");
+        getEl('overviewSubtitle').textContent = 'Please select a site to begin.';
+        return;
+    }
+    setLoading(true, "Loading data for selected site...");
+    
+    // Reset local state before loading new site data
+    appState.finalSlottedData = {};
+    appState.unslottedItems = [];
+    
+    const settingsPath = `sites/${siteId}/configs/mainSettings`;
+    const storedSettings = await loadDataFromFirestore(settingsPath.split('/')[0], settingsPath.split('/')[1]);
+
     if (storedSettings) {
-        // Layout
         getEl('rackCount').value = storedSettings.rackCount || 26;
         getEl('sectionsPerRack').value = storedSettings.sectionsPerRack || 8;
         getEl('stacksPerSection').value = storedSettings.stacksPerSection || 5;
         getEl('slotsPerStack').value = storedSettings.slotsPerStack || 5;
-        // General
         getEl('excludeRacks').value = storedSettings.excludeRacks || '';
         getEl('includeKids').checked = storedSettings.includeKids || false;
         getEl('userInitials').value = storedSettings.userInitials || '';
         appState.userInitials = storedSettings.userInitials || '';
-        // Colors
         getEl('colorMen').value = storedSettings.colorMap?.M.onHand || '#5468C1';
         getEl('colorMenPO').value = storedSettings.colorMap?.M.po || '#a9b3e0';
         getEl('colorWomen').value = storedSettings.colorMap?.W.onHand || '#f846f0';
@@ -208,7 +223,13 @@ async function initializeFromStorage() {
         getEl('colorKids').value = storedSettings.colorMap?.K.onHand || '#64d669';
         getEl('colorKidsPO').value = storedSettings.colorMap?.K.po || '#b1ebc4';
         getEl('colorCushion').value = storedSettings.cushionIndicatorColor || '#6b7280';
-        updateColorState(); // Apply loaded colors
+        updateColorState();
+    }
+
+    const slottingData = await loadDataFromFirestore(`sites/${siteId}/slotting`, 'current');
+    if (slottingData) {
+        appState.finalSlottedData = slottingData.data || {};
+        appState.unslottedItems = slottingData.unslotted || [];
     }
 
     const cushionData = await loadDataFromFirestore('configs', 'cushionData');
@@ -217,22 +238,24 @@ async function initializeFromStorage() {
         appState.modelCushionAssignments = cushionData.assignments || {};
     }
 
-    const poSnapshot = await db.collection('purchaseOrders').get();
-    appState.loadedPOs = {}; // Reset before loading
+    const poSnapshot = await db.collection(`sites/${siteId}/purchaseOrders`).get();
+    appState.loadedPOs = {};
     poSnapshot.forEach(doc => {
         appState.loadedPOs[doc.id] = doc.data();
     });
-    if (Object.keys(appState.loadedPOs).length > 0) {
-        renderPODetails();
-    }
+    renderPODetails();
 
-    const exclusionData = await loadDataFromFirestore('configs', 'exclusionKeywords');
+    const exclusionData = await loadDataFromFirestore(`sites/${siteId}/configs`, 'exclusionKeywords');
     if (exclusionData) {
         appState.exclusionKeywords = exclusionData.keywords || [];
     }
     
     renderExclusionList();
     renderCushionUI();
+    renderUI();
+    renderMetricsPanel();
+    renderUnslottedReport();
+    updateFilterDropdowns();
     setLoading(false);
 }
 
@@ -255,6 +278,10 @@ async function saveSettings() {
         showToast("You do not have permission to save settings.", "error");
         return;
     }
+    if (!appState.selectedSiteId) {
+        showToast("No site selected. Cannot save settings.", "error");
+        return;
+    }
     setLoading(true, "Saving settings...");
     updateColorState();
     appState.userInitials = getEl('userInitials').value.toUpperCase();
@@ -269,12 +296,10 @@ async function saveSettings() {
         colorMap: appState.colorMap,
         cushionIndicatorColor: appState.cushionIndicatorColor
     };
-    await saveDataToFirestore('configs', 'mainSettings', settings);
-    await saveCushionData();
-    showToast('Settings saved to cloud!', 'success');
-    renderUI(); // Re-render to apply color changes immediately
-    renderMetricsPanel(); // Re-render chart with new colors
-    renderCushionUI(); // Re-render cushion tab with new colors
+    await saveDataToFirestore(`sites/${appState.selectedSiteId}/configs`, 'mainSettings', settings);
+    showToast('Settings saved for this site!', 'success');
+    renderUI();
+    renderMetricsPanel();
     setLoading(false);
 }
 
@@ -446,6 +471,10 @@ async function runSlottingProcess() {
         showToast("You do not have permission to run the slotting process.", "error");
         return;
     }
+    if (!appState.selectedSiteId) {
+        showToast("Please select a site before slotting.", "error");
+        return;
+    }
     
     setLoading(true, 'Preparing data for processing...');
 
@@ -480,54 +509,42 @@ async function runSlottingProcess() {
         }
         const token = await user.getIdToken();
 
-        const response = await fetch('/.netlify/functions/run-slotting', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
+        const runSlotting = functions.httpsCallable('run-slotting');
+        const result = await runSlotting({
+            siteId: appState.selectedSiteId,
+            inventoryData,
+            poData,
+            previousSlottingData,
+            settings: {
+                rackCount: getEl('rackCount').value,
+                sectionsPerRack: getEl('sectionsPerRack').value,
+                stacksPerSection: getEl('stacksPerSection').value,
+                slotsPerStack: getEl('slotsPerStack').value,
+                excludeRacks: getEl('excludeRacks').value,
+                includeKids: getEl('includeKids').checked,
             },
-            body: JSON.stringify({
-                inventoryData,
-                poData,
-                previousSlottingData,
-                settings: {
-                    rackCount: getEl('rackCount').value,
-                    sectionsPerRack: getEl('sectionsPerRack').value,
-                    stacksPerSection: getEl('stacksPerSection').value,
-                    slotsPerStack: getEl('slotsPerStack').value,
-                    excludeRacks: getEl('excludeRacks').value,
-                    includeKids: getEl('includeKids').checked,
-                },
-                cushionData: {
-                    levels: appState.cushionLevels,
-                    assignments: appState.modelCushionAssignments,
-                },
-                exclusionKeywords: appState.exclusionKeywords,
-            }),
+            cushionData: {
+                levels: appState.cushionLevels,
+                assignments: appState.modelCushionAssignments,
+            },
+            exclusionKeywords: appState.exclusionKeywords,
         });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Cloud function failed: ${errorText}`);
-        }
-
-        const result = await response.json();
 
         setLoading(true, 'Rendering results...');
         
-        appState.finalSlottedData = result.finalSlottedData;
-        appState.unslottedItems = result.unslottedItems;
+        appState.finalSlottedData = result.data.finalSlottedData;
+        appState.unslottedItems = result.data.unslottedItems;
 
         // The function doesn't need to save POs, the client does after parsing
         await parsePOFiles(poFiles); 
         const batch = db.batch();
         Object.entries(appState.loadedPOs).forEach(([poKey, po]) => {
-            const poRef = db.collection('purchaseOrders').doc(poKey);
+            const poRef = db.collection(`sites/${appState.selectedSiteId}/purchaseOrders`).doc(poKey);
             batch.set(poRef, po);
         });
         await batch.commit();
 
-        renderMetricsPanel(result.newlySlottedCount);
+        renderMetricsPanel(result.data.newlySlottedCount);
         renderUnslottedReport();
         updateFilterDropdowns();
         renderUI();
@@ -620,7 +637,7 @@ async function renderPODetails() {
 
     const poEntries = Object.entries(appState.loadedPOs);
     if (poEntries.length === 0) {
-        container.innerHTML = `<p class="text-gray-500">No POs loaded.</p>`;
+        container.innerHTML = `<p class="text-gray-500">No POs loaded for this site.</p>`;
         summaryEl.innerHTML = '';
         return;
     }
@@ -673,7 +690,7 @@ async function markPOAsReceived(poKey) {
         }
     }
     
-    await saveDataToFirestore('purchaseOrders', poKey, poData);
+    await saveDataToFirestore(`sites/${appState.selectedSiteId}/purchaseOrders`, poKey, poData);
     renderPODetails();
     renderUI();
     renderMetricsPanel();
@@ -1045,7 +1062,7 @@ async function addExclusionKeyword() {
     const keyword = input.value.trim();
     if (keyword && !appState.exclusionKeywords.includes(keyword)) {
         appState.exclusionKeywords.push(keyword);
-        await saveDataToFirestore('configs', 'exclusionKeywords', { keywords: appState.exclusionKeywords });
+        await saveDataToFirestore(`sites/${appState.selectedSiteId}/configs`, 'exclusionKeywords', { keywords: appState.exclusionKeywords });
         renderExclusionList();
         showToast(`'${keyword}' added to exclusions.`, 'success');
         input.value = '';
@@ -1058,7 +1075,7 @@ async function addExclusionKeyword() {
 
 async function removeExclusionKeyword(keyword) {
     appState.exclusionKeywords = appState.exclusionKeywords.filter(kw => kw !== keyword);
-    await saveDataToFirestore('configs', 'exclusionKeywords', { keywords: appState.exclusionKeywords });
+    await saveDataToFirestore(`sites/${appState.selectedSiteId}/configs`, 'exclusionKeywords', { keywords: appState.exclusionKeywords });
     renderExclusionList();
     showToast(`'${keyword}' removed from exclusions.`, 'info');
 }
@@ -1622,6 +1639,7 @@ document.addEventListener('DOMContentLoaded', function () {
             appState.currentUser.uid = user.uid;
             appState.currentUser.email = user.email;
             appState.currentUser.role = userProfile.role;
+            appState.currentUser.homeSiteId = userProfile.homeSiteId || null;
 
             userEmailSpan.textContent = user.email;
             userInfoDiv.classList.remove('hidden');
@@ -1637,7 +1655,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         } else {
             // User is signed out.
-            appState.currentUser = { uid: null, email: null, role: null };
+            appState.currentUser = { uid: null, email: null, role: null, homeSiteId: null };
             authContainer.classList.remove('hidden');
             appContainer.classList.add('hidden');
             userInfoDiv.classList.add('hidden');
