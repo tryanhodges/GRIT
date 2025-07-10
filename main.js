@@ -1,16 +1,13 @@
 // --- START: Firebase Configuration ---
 // TODO: Add your Firebase project configuration here
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
-  apiKey: "AIzaSyCb31JTu267sVk65VG--Grlp14w6cpkq2c",
-  authDomain: "grit-7fb60.firebaseapp.com",
-  projectId: "grit-7fb60",
-  storageBucket: "grit-7fb60.firebasestorage.app",
-  messagingSenderId: "278201731023",
-  appId: "1:278201731023:web:b1f4c1662a427dcabcb4ba",
-  measurementId: "G-LJ16FE68W4"
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };
-
 
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
@@ -1606,6 +1603,114 @@ async function deleteUser(uid, email) {
     });
 }
 
+// --- Site Management ---
+async function loadSites() {
+    const sitesSnapshot = await db.collection('sites').get();
+    appState.sites = sitesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    
+    const selector = getEl('site-selector');
+    selector.innerHTML = '';
+    if (appState.sites.length === 0) {
+        selector.innerHTML = '<option>No sites available</option>';
+    } else {
+        appState.sites.forEach(site => {
+            const option = document.createElement('option');
+            option.value = site.id;
+            option.textContent = site.name;
+            selector.appendChild(option);
+        });
+    }
+}
+
+async function createNewSite() {
+    const input = getEl('new-site-name');
+    const siteName = input.value.trim();
+    if (!siteName) {
+        showToast("Please enter a site name.", "error");
+        return;
+    }
+    const siteId = siteName.toLowerCase().replace(/\s+/g, '-');
+    
+    setLoading(true, `Creating site: ${siteName}...`);
+    try {
+        await saveDataToFirestore('sites', siteId, { name: siteName });
+        input.value = '';
+        showToast("Site created successfully!", "success");
+        await loadSites(); // Refresh site list
+        renderSiteManagementModal();
+    } catch (error) {
+        showToast("Error creating site.", "error");
+    } finally {
+        setLoading(false);
+    }
+}
+
+async function deleteSite(siteId, siteName) {
+    showConfirmationModal('Delete Site?', `Are you sure you want to delete ${siteName}? All associated data (settings, slotting, POs) will be permanently lost.`, async () => {
+        setLoading(true, `Deleting site: ${siteName}...`);
+        try {
+            await deleteDocument('sites', siteId);
+            // In a real-world app, you would use a Cloud Function to delete all subcollections.
+            // For now, we just delete the main site doc.
+            showToast("Site deleted successfully.", "success");
+            await loadSites();
+            renderSiteManagementModal();
+        } catch (error) {
+            showToast("Error deleting site.", "error");
+        } finally {
+            setLoading(false);
+        }
+    });
+}
+
+async function setHomeSite() {
+    const selectedSiteId = getEl('site-selector').value;
+    if (!selectedSiteId) {
+        showToast("Please select a site first.", "error");
+        return;
+    }
+    
+    setLoading(true, "Setting home site...");
+    try {
+        await saveDataToFirestore('users', appState.currentUser.uid, { homeSiteId: selectedSiteId });
+        appState.currentUser.homeSiteId = selectedSiteId;
+        showToast("Home site saved!", "success");
+    } catch (error) {
+        showToast("Error setting home site.", "error");
+    } finally {
+        setLoading(false);
+    }
+}
+
+function renderSiteManagementModal() {
+    const container = getEl('site-list-container');
+    container.innerHTML = '';
+    if (appState.sites.length === 0) {
+        container.innerHTML = '<p class="text-gray-500">No sites created yet.</p>';
+        return;
+    }
+    appState.sites.forEach(site => {
+        const el = document.createElement('div');
+        el.className = 'flex justify-between items-center p-3 rounded-lg bg-gray-50 border';
+        el.innerHTML = `
+            <span class="font-semibold">${site.name}</span>
+            <button data-site-id="${site.id}" data-site-name="${site.name}" class="delete-site-btn text-red-500 hover:text-red-700">&times;</button>
+        `;
+        container.appendChild(el);
+    });
+
+    document.querySelectorAll('.delete-site-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => deleteSite(e.target.dataset.siteId, e.target.dataset.siteName));
+    });
+}
+
+function updateUiForSiteSelection() {
+    const hasSite = !!appState.selectedSiteId;
+    document.querySelectorAll('.file-input-btn, #slotBtn').forEach(el => {
+        el.disabled = !hasSite;
+    });
+}
+
 
 // --- START: Main Execution ---
 document.addEventListener('DOMContentLoaded', function () {
@@ -1668,8 +1773,7 @@ document.addEventListener('DOMContentLoaded', function () {
     getEl('downloadUnslottedBtn').addEventListener('click', downloadUnslottedCSV);
 
 
-    getEl('searchInput').addEventListener('input', searchAndRender);
-    getEl('searchClearBtn').addEventListener('click', () => { getEl('searchInput').value = ''; searchAndRender(); });
+    getEl('search-btn').addEventListener('click', searchAndRender);
     getEl('clearInventoryBtn').addEventListener('click', clearLoadedInventory);
     getEl('clearPOsBtn').addEventListener('click', clearLoadedPOs);
     getEl('add-exclusion-btn').addEventListener('click', addExclusionKeyword);
@@ -1720,8 +1824,6 @@ document.addEventListener('DOMContentLoaded', function () {
         saveSettings();
         settingsModal.classList.remove('visible');
     });
-    getEl('clearStorageBtn').addEventListener('click', clearAllStoredData);
-    getEl('clearAllPOsBtn').addEventListener('click', clearAllPOData);
 
     // User Management Modal Logic
     const userManagementModal = getEl('user-management-modal');
@@ -1758,7 +1860,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Global click listener to close dropdowns/modals
     document.addEventListener('click', (e) => {
-        if (!helpDropdown.contains(e.target) && !helpBtn.contains(e.target)) {
+        if (helpDropdown && !helpDropdown.contains(e.target) && !helpBtn.contains(e.target)) {
             helpDropdown.classList.add('hidden');
         }
     });
@@ -1769,4 +1871,3 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 });
 // --- END: Main Execution ---
-
