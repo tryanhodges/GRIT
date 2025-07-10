@@ -11,7 +11,6 @@ const firebaseConfig = {
   measurementId: "G-LJ16FE68W4"
 };
 
-
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
@@ -447,103 +446,88 @@ async function runSlottingProcess() {
         showToast("You do not have permission to run the slotting process.", "error");
         return;
     }
-    setLoading(true, 'Initializing...');
-    await saveCushionData(); // Save any pending cushion changes before running
-    await saveSettings(); // Save settings on run
     
+    setLoading(true, 'Preparing data for processing...');
+
     try {
-        setLoading(true, 'Reading files and data...');
-        await new Promise(r => setTimeout(r, 50));
-        let existingBackroom = {};
-        const prevSlottingFile = getEl('prevSlottingFile').files[0];
-        
-        if (prevSlottingFile) {
-            const prevSlottingCSV = await readFileAsText(prevSlottingFile);
-            const lines = robustCSVParse(prevSlottingCSV);
-            const headerMap = createHeaderMap(lines[0]);
-            const originalItemStringIndex = headerMap['originalitemstring'];
-            const brandIndex = headerMap['brand'];
-            const typeIndex = headerMap['type'];
-            const locationIdIndex = headerMap['locationid'];
-
-            if (locationIdIndex === undefined || brandIndex === undefined || typeIndex === undefined) {
-                 throw new Error("Previous Slotting file is missing required columns: LocationID, Brand, Type.");
-            }
-
-            for(let i = 1; i < lines.length; i++){
-                 const cols = lines[i];
-                 if (cols.length < 3) continue;
-                 const locationId = cols[locationIdIndex];
-                 if (!locationId) continue;
-
-                 const originalString = originalItemStringIndex !== undefined ? cols[originalItemStringIndex] : null;
-                 const brand = cols[brandIndex];
-                 
-                 if (originalString) {
-                     const { Model, Color, Size, Sex } = parseItemString(originalString);
-                     const uniqueID = `${brand}-${Model}-${Color}-${Size}-${i}`; // Regenerate UniqueID
-                     existingBackroom[locationId] = {
-                         UniqueID: uniqueID,
-                         Brand: brand,
-                         Model, Color, Size, Sex,
-                         Type: cols[typeIndex],
-                         OriginalItemString: originalString
-                     };
-                 } else {
-                     // Fallback for old CSV formats without the original string
-                     const model = cols[headerMap['model']];
-                     const color = cols[headerMap['color']];
-                     const size = cols[headerMap['size']];
-                     const sex = cols[headerMap['sex']];
-                     const uniqueID = `${brand}-${model}-${color}-${size}-${i}`; // Regenerate UniqueID
-                     existingBackroom[locationId] = {
-                         UniqueID: uniqueID,
-                         Brand: brand, Model: model, Size: size, Color: color,
-                         Type: cols[typeIndex], Sex: sex,
-                         OriginalItemString: `${sex} ${model} ${color} ${size}`.trim()
-                     };
-                 }
-            }
-        }
-
         const inventoryFiles = getEl('inventoryFile').files;
         const poFiles = getEl('poFile').files;
+        const prevSlottingFile = getEl('prevSlottingFile').files[0];
 
-        setLoading(true, 'Processing inventory and POs...');
-        await new Promise(r => setTimeout(r, 50));
+        const readFilePromises = [];
+        const inventoryData = [];
+        const poData = [];
 
-        const inventoryItems = await parseInventoryFiles(inventoryFiles);
-        await parsePOFiles(poFiles);
+        for (const file of inventoryFiles) {
+            readFilePromises.push(readFileAsText(file).then(content => inventoryData.push({ name: file.name, brand: toTitleCase(file.name.replace(/\s*\d*\.csv$/i, '').trim()), content })));
+        }
+        for (const file of poFiles) {
+            readFilePromises.push(readFileAsText(file).then(content => poData.push({ name: file.name, brand: toTitleCase(file.name.replace(/\s*\d*\.csv$/i, '').trim()), content })));
+        }
+        
+        let previousSlottingData = null;
+        if (prevSlottingFile) {
+            readFilePromises.push(readFileAsText(prevSlottingFile).then(content => previousSlottingData = content));
+        }
 
-        const unstockedPOs = Object.values(appState.loadedPOs)
-            .filter(po => po.status === 'unreceived')
-            .flatMap(po => po.items);
-        
-        // Update cushion UI with all models from loaded files
-        const allItems = [...inventoryItems, ...unstockedPOs];
-        updateModelAssignmentList(allItems);
+        await Promise.all(readFilePromises);
 
-        setLoading(true, 'Reconciling inventory...');
-        await new Promise(r => setTimeout(r, 50));
-        const { itemsToSlot, reconciledBackroom } = reconcileInventory(existingBackroom, inventoryItems, unstockedPOs);
+        setLoading(true, 'Processing in the cloud... This may take a moment.');
+
+        const user = auth.currentUser;
+        if (!user) {
+            throw new Error("User not authenticated.");
+        }
+        const token = await user.getIdToken();
+
+        const response = await fetch('/.netlify/functions/run-slotting', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                inventoryData,
+                poData,
+                previousSlottingData,
+                settings: {
+                    rackCount: getEl('rackCount').value,
+                    sectionsPerRack: getEl('sectionsPerRack').value,
+                    stacksPerSection: getEl('stacksPerSection').value,
+                    slotsPerStack: getEl('slotsPerStack').value,
+                    excludeRacks: getEl('excludeRacks').value,
+                    includeKids: getEl('includeKids').checked,
+                },
+                cushionData: {
+                    levels: appState.cushionLevels,
+                    assignments: appState.modelCushionAssignments,
+                },
+                exclusionKeywords: appState.exclusionKeywords,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Cloud function failed: ${errorText}`);
+        }
+
+        const result = await response.json();
+
+        setLoading(true, 'Rendering results...');
         
-        setLoading(true, 'Generating optimal slotting...');
-        await new Promise(r => setTimeout(r, 50));
-        const { backroom, unslottedItems } = generateSlotting(itemsToSlot, reconciledBackroom);
-        
-        appState.finalSlottedData = backroom;
-        appState.unslottedItems = unslottedItems;
-        
+        appState.finalSlottedData = result.finalSlottedData;
+        appState.unslottedItems = result.unslottedItems;
+
+        // The function doesn't need to save POs, the client does after parsing
+        await parsePOFiles(poFiles); 
         const batch = db.batch();
-        Object.values(appState.loadedPOs).forEach(po => {
-            const poRef = db.collection('purchaseOrders').doc(po.items[0].UniqueID.split('-PO-')[0]);
+        Object.entries(appState.loadedPOs).forEach(([poKey, po]) => {
+            const poRef = db.collection('purchaseOrders').doc(poKey);
             batch.set(poRef, po);
         });
         await batch.commit();
 
-        setLoading(true, 'Rendering visualization...');
-        await new Promise(r => setTimeout(r, 50));
-        renderMetricsPanel(itemsToSlot.length);
+        renderMetricsPanel(result.newlySlottedCount);
         renderUnslottedReport();
         updateFilterDropdowns();
         renderUI();
@@ -552,7 +536,7 @@ async function runSlottingProcess() {
         showToast("Slotting process complete!", "success");
 
     } catch (error) {
-        console.error("Error processing files:", error);
+        console.error("Error calling cloud function:", error);
         showToast(`An error occurred: ${error.message}`, "error");
     } finally {
         setLoading(false);
@@ -560,181 +544,8 @@ async function runSlottingProcess() {
 }
 
 // --- Parsing Functions ---
-function createHeaderMap(headerRow) {
-    const map = {};
-    headerRow.forEach((header, index) => {
-        const normalizedHeader = header.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '');
-        map[normalizedHeader] = index;
-    });
-    return map;
-}
-
-function robustCSVParse(csvText) {
-    // Remove BOM if it exists
-    if (csvText.charCodeAt(0) === 0xFEFF) {
-        csvText = csvText.substring(1);
-    }
-    const rows = [];
-    let currentRow = [];
-    let currentField = '';
-    let inQuotedField = false;
-
-    for (let i = 0; i < csvText.length; i++) {
-        const char = csvText[i];
-
-        if (inQuotedField) {
-            if (char === '"') {
-                if (i + 1 < csvText.length && csvText[i + 1] === '"') {
-                    currentField += '"';
-                    i++;
-                } else {
-                    inQuotedField = false;
-                }
-            } else {
-                currentField += char;
-            }
-        } else {
-            if (char === '"') {
-                inQuotedField = true;
-            } else if (char === ',') {
-                currentRow.push(currentField);
-                currentField = '';
-            } else if (char === '\n' || char === '\r') {
-                if (i > 0 && csvText[i-1] !== '\n' && csvText[i-1] !== '\r') {
-                    currentRow.push(currentField);
-                    rows.push(currentRow);
-                    currentRow = [];
-                    currentField = '';
-                }
-                 if (char === '\r' && i + 1 < csvText.length && csvText[i+1] === '\n') {
-                    i++;
-                }
-            } else {
-                currentField += char;
-            }
-        }
-    }
-    if (currentField) currentRow.push(currentField);
-    if (currentRow.length > 0) rows.push(currentRow);
-
-    return rows;
-}
-
 function toTitleCase(str) {
     return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-}
-
-function parseItemString(itemString) {
-    // 1. Handle Sex prefix
-    let sex = 'M';
-    let cleanItemString = itemString.trim();
-    const firstChar = cleanItemString.charAt(0).toUpperCase();
-    if (['M', 'W', 'Y', 'K'].includes(firstChar)) {
-        sex = firstChar;
-        cleanItemString = cleanItemString.substring(1).trim();
-    }
-
-    const words = cleanItemString.split(/\s+/).filter(w => w.length > 0);
-    if (words.length === 0) {
-        return { Model: 'N/A', Color: 'N/A', Size: 'N/A', Sex: sex };
-    }
-
-    // 2. Find Size: last word is a number
-    let size = 'N/A';
-    let wordsBeforeSize = [...words];
-    const lastWord = words[words.length - 1];
-    if (lastWord && !isNaN(parseFloat(lastWord)) && isFinite(lastWord)) {
-        size = lastWord;
-        wordsBeforeSize.pop(); // Remove size from the array for further processing
-    }
-
-    if (wordsBeforeSize.length === 0) {
-        return { Model: 'N/A', Color: 'N/A', Size: size, Sex: sex };
-    }
-    
-    // 4. Find the last word containing a number to determine the end of the model name.
-    let modelEndIndex = -1;
-    for (let i = wordsBeforeSize.length - 1; i >= 0; i--) {
-        if (/\d/.test(wordsBeforeSize[i])) {
-            modelEndIndex = i;
-            break;
-        }
-    }
-
-    let model = '';
-    let color = '';
-
-    if (modelEndIndex !== -1) {
-        // Case: A word with a number was found (e.g., "Cloud 5")
-        model = wordsBeforeSize.slice(0, modelEndIndex + 1).join(' ');
-        color = wordsBeforeSize.slice(modelEndIndex + 1).join(' ');
-    } else {
-        // Case: No word with a number was found (e.g., "Cloudsurfer")
-        // The last word is the color, everything else is the model.
-        if (wordsBeforeSize.length > 0) {
-            color = wordsBeforeSize.pop();
-            model = wordsBeforeSize.join(' ');
-        }
-    }
-
-    return { 
-        Model: model.trim() || 'N/A', 
-        Color: color.trim() || 'N/A', 
-        Size: size, 
-        Sex: sex 
-    };
-}
-
-
-async function parseInventoryFiles(fileList) {
-    const includeKids = getEl('includeKids').checked;
-    let allItems = [];
-    for (const file of fileList) {
-        const brand = toTitleCase(file.name.replace(/\s*\d*\.csv$/i, '').trim());
-        const csvText = await readFileAsText(file);
-        const lines = robustCSVParse(csvText);
-        if (lines.length < 2) continue;
-
-        const headerMap = createHeaderMap(lines[0]);
-        const itemIndex = headerMap['item'];
-        const remainingIndex = headerMap['remaining'];
-        if (itemIndex === undefined || remainingIndex === undefined) {
-            showToast(`Skipping ${file.name}: Missing 'Item' or 'Remaining' column.`, 'error');
-            continue;
-        }
-
-        let itemCount = 0;
-        for (let i = 1; i < lines.length; i++) {
-            const cols = lines[i];
-            const itemString = cols[itemIndex];
-            if (appState.exclusionKeywords.some(kw => itemString.toLowerCase().includes(kw.toLowerCase()))) {
-                continue;
-            }
-            const remaining = parseInt(cols[remainingIndex], 10);
-
-            if (itemString && !isNaN(remaining) && remaining > 0) {
-                const { Model, Color, Size, Sex } = parseItemString(itemString);
-                if (!includeKids && (Sex === 'Y' || Sex === 'K')) {
-                    continue;
-                }
-                itemCount += remaining;
-                for (let j = 0; j < remaining; j++) {
-                    allItems.push({ 
-                        Brand: brand, Model, Color, Size, Sex, 
-                        Sales: 0, Type: 'Inventory', 
-                        UniqueID: `${brand}-${Model}-${Color}-${Size}-${j + 1}`,
-                        OriginalItemString: itemString // Save original string
-                    });
-                }
-            }
-        }
-        const fileNamesContainer = getEl('inventoryFileNames');
-        const fileDiv = Array.from(fileNamesContainer.children).find(el => el.textContent.includes(file.name));
-        if (fileDiv) {
-            fileDiv.innerHTML = `${file.name} <span class="text-gray-400">- ${itemCount} items</span>`;
-        }
-    }
-    return allItems;
 }
 
 async function parsePOFiles(fileList) {
@@ -799,199 +610,6 @@ async function parsePOFiles(fileList) {
         }
     }
     if(newPOsLoaded) renderPODetails();
-}
-
-// --- Slotting and Reconciliation Logic ---
-function reconcileInventory(existingBackroom, currentInventoryItems, unstockedPOs) {
-    const reconciledBackroom = {};
-    const alreadyPlacedUniqueIDs = new Set();
-    const currentInventoryMap = new Map(currentInventoryItems.map(item => [item.UniqueID, item]));
-
-    Object.entries(existingBackroom).forEach(([locationId, item]) => {
-        if (currentInventoryMap.has(item.UniqueID)) {
-            reconciledBackroom[locationId] = currentInventoryMap.get(item.UniqueID);
-            alreadyPlacedUniqueIDs.add(item.UniqueID);
-        }
-    });
-
-    const newInventoryItems = currentInventoryItems.filter(item => !alreadyPlacedUniqueIDs.has(item.UniqueID));
-    let itemsToSlot = [...newInventoryItems, ...unstockedPOs];
-
-    // Calculate brand volumes for sorting
-    const brandVolume = itemsToSlot.reduce((acc, item) => {
-        acc[item.Brand] = (acc[item.Brand] || 0) + 1;
-        return acc;
-    }, {});
-
-    const sexSortOrder = { 'W': 1, 'M': 2, 'Y': 3, 'K': 3 };
-    const cushionPriority = appState.cushionLevels;
-    const modelAssignments = appState.modelCushionAssignments;
-
-    itemsToSlot.sort((a, b) => {
-        // 1. Sex
-        const sexA = sexSortOrder[a.Sex] || 4;
-        const sexB = sexSortOrder[b.Sex] || 4;
-        if (sexA !== sexB) return sexA - sexB;
-
-        // 2. Brand Volume (descending)
-        const volumeA = brandVolume[a.Brand] || 0;
-        const volumeB = brandVolume[b.Brand] || 0;
-        if (volumeA !== volumeB) return volumeB - volumeA;
-
-        // 3. Cushion Level
-        const cushionA = modelAssignments[a.Model];
-        const cushionB = modelAssignments[b.Model];
-        const priorityA = cushionA ? cushionPriority.indexOf(cushionA) : 999;
-        const priorityB = cushionB ? cushionPriority.indexOf(cushionB) : 999;
-        if (priorityA !== priorityB) return priorityA - priorityB;
-
-        // 4. Model (alpha)
-        if (a.Model < b.Model) return -1; if (a.Model > b.Model) return 1;
-
-        // 5. Color (alpha)
-        if (a.Color < b.Color) return -1; if (a.Color > b.Color) return 1;
-
-        // 6. Size (descending)
-        const sizeA = parseFloat(a.Size);
-        const sizeB = parseFloat(b.Size);
-        if (!isNaN(sizeA) && !isNaN(sizeB)) return sizeB - sizeA;
-
-        return a.Size.localeCompare(b.Size);
-    });
-
-    return { itemsToSlot, reconciledBackroom };
-}
-
-function generateSlotting(itemsToSlot, existingBackroom) {
-    const totalRacks = parseInt(getEl('rackCount')?.value) || 26;
-    const sectionsPerRack = parseInt(getEl('sectionsPerRack').value) || 8;
-    const stacksPerSection = parseInt(getEl('stacksPerSection').value) || 5;
-    const slotsPerStack = parseInt(getEl('slotsPerStack').value) || 5;
-    const excludedRacks = getEl('excludeRacks').value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
-
-    const sectionPriorityOrder = Array.from({ length: sectionsPerRack }, (_, i) => i + 1);
-    const backroom = { ...existingBackroom };
-
-    const rackAssignments = {}; // { rackId: { sex: 'M', brand: 'Nike' } }
-    Object.entries(existingBackroom).forEach(([locationId, item]) => {
-        const [rackId] = locationId.split('-');
-        if (!rackAssignments[rackId]) {
-            rackAssignments[rackId] = { sex: item.Sex, brand: item.Brand };
-        }
-    });
-
-    const itemGroups = new Map();
-    for (const item of itemsToSlot) {
-        const key = `${item.Sex}-${item.Brand}-${item.Model}-${item.Color}-${item.Size}-${item.Type}`;
-        if (!itemGroups.has(key)) {
-            itemGroups.set(key, { item: item, originalItems: [] });
-        }
-        itemGroups.get(key).originalItems.push(item);
-    }
-
-    let unslottedGroups = Array.from(itemGroups.values());
-
-    // --- Slotting Passes ---
-    const slottingPasses = [
-        { mixColors: false, mixBrands: false }, // Pass 1: Strict
-        { mixColors: true,  mixBrands: false }, // Pass 2: Mix Colors
-        { mixColors: false, mixBrands: true  }, // Pass 3: Mix Brands
-        { mixColors: true,  mixBrands: true  }  // Pass 4: Mix Both
-    ];
-
-    for (const passConfig of slottingPasses) {
-        const remainingGroups = [];
-        for (const group of unslottedGroups) {
-            const { item, originalItems } = group;
-            let slotted = false;
-
-            groupSearch:
-            for (let rackId = 1; rackId <= totalRacks; rackId++) {
-                if (excludedRacks.includes(rackId)) continue;
-
-                const rackInfo = rackAssignments[rackId];
-                if (rackInfo && rackInfo.sex !== item.Sex) continue; // Wrong sex for this rack
-                if (rackInfo && !passConfig.mixBrands && rackInfo.brand !== item.Brand) continue; // Wrong brand for this rack (in strict mode)
-
-                for (const sectionId of sectionPriorityOrder) {
-                    let slotsInStack = {}; // { stackId: { model, color, emptySlots } }
-                    let emptySlotsInSection = 0;
-
-                    // Analyze section
-                    for (let sId = 1; sId <= stacksPerSection; sId++) {
-                        slotsInStack[sId] = { model: null, color: null, emptySlots: 0 };
-                        for (let slId = 1; slId <= slotsPerStack; slId++) {
-                            const loc = `${rackId}-${sectionId}-${sId}-${slId}`;
-                            const existingItem = backroom[loc];
-                            if (existingItem) {
-                                if (!slotsInStack[sId].model) {
-                                    slotsInStack[sId].model = existingItem.Model;
-                                    slotsInStack[sId].color = existingItem.Color;
-                                }
-                            } else {
-                                slotsInStack[sId].emptySlots++;
-                                emptySlotsInSection++;
-                            }
-                        }
-                    }
-
-                    // Can the group physically fit?
-                    if (emptySlotsInSection < originalItems.length) continue;
-
-                    // Check if placement rules are met
-                    let availableStacks = [];
-                    for (let sId = 1; sId <= stacksPerSection; sId++) {
-                        const stack = slotsInStack[sId];
-                        const canUseStack = stack.emptySlots > 0 && (
-                            !stack.model || // empty stack
-                            (stack.model === item.Model && stack.color === item.Color) || // same item
-                            (passConfig.mixColors && stack.model === item.Model) // same model, mix color allowed
-                        );
-                        if (canUseStack) {
-                            availableStacks.push({stackId: sId, emptySlots: stack.emptySlots});
-                        }
-                    }
-
-                    const totalAvailableSlots = availableStacks.reduce((sum, s) => sum + s.emptySlots, 0);
-
-                    if (totalAvailableSlots >= originalItems.length) {
-                        // Slot the items (bottom-right first)
-                        let placedCount = 0;
-                        for (const stack of availableStacks.sort((a,b) => b.stackId - a.stackId)) {
-                             for (let slotId = 1; slotId <= slotsPerStack; slotId++) {
-                                 if (placedCount >= originalItems.length) break;
-                                 const locId = `${rackId}-${sectionId}-${stack.stackId}-${slotId}`;
-                                 if (!backroom[locId]) {
-                                     const currentItem = originalItems[placedCount];
-                                     backroom[locId] = currentItem;
-                                     currentItem.LocationID = locId;
-                                     if (!rackAssignments[rackId]) {
-                                         rackAssignments[rackId] = { sex: item.Sex, brand: item.Brand };
-                                     }
-                                     placedCount++;
-                                 }
-                             }
-                             if (placedCount >= originalItems.length) break;
-                        }
-                        slotted = true;
-                        break groupSearch; // Group is slotted, move to next group
-                    }
-                }
-            }
-            if (!slotted) {
-                remainingGroups.push(group);
-            }
-        }
-        unslottedGroups = remainingGroups;
-        if (unslottedGroups.length === 0) break;
-    }
-
-    const unslottedItems = unslottedGroups.flatMap(g => g.originalItems);
-    if (unslottedItems.length > 0) {
-        showToast(`${unslottedItems.length} items could not be slotted. Check the 'Unslotted Items' tab.`, "error");
-    }
-
-    return { backroom, unslottedItems };
 }
 
 // --- Rendering Functions ---
@@ -1805,6 +1423,40 @@ function clearAuthError() {
     getEl('auth-error').classList.add('hidden');
 }
 
+async function getOrCreateUserProfile(user) {
+    const userRef = db.collection('users').doc(user.uid);
+    const userDoc = await userRef.get();
+
+    if (!userDoc.exists) {
+        // This is a new user, create their profile
+        const usersCollection = await db.collection('users').limit(1).get();
+        const role = usersCollection.empty ? 'manager' : 'salesfloor';
+        
+        const newUserProfile = {
+            email: user.email,
+            role: role,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        await userRef.set(newUserProfile);
+        showToast(`Account created! You have been assigned the '${role}' role.`, 'success');
+        return newUserProfile;
+    } else {
+        // Existing user
+        return userDoc.data();
+    }
+}
+
+async function handleGoogleSignIn() {
+    clearAuthError();
+    const provider = new firebase.auth.GoogleAuthProvider();
+    try {
+        await auth.signInWithPopup(provider);
+        // onAuthStateChanged will handle the rest
+    } catch (error) {
+        showAuthError(error.message);
+    }
+}
+
 async function handleSignUp() {
     clearAuthError();
     const email = getEl('email').value;
@@ -1817,22 +1469,8 @@ async function handleSignUp() {
 
     setLoading(true, "Creating account...");
     try {
-        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
-        const user = userCredential.user;
-
-        // Check if this is the first user ever. If so, make them a manager.
-        const usersCollection = await db.collection('users').limit(1).get();
-        const role = usersCollection.empty ? 'manager' : 'salesfloor';
-
-        // Create a user profile document in Firestore
-        await db.collection('users').doc(user.uid).set({
-            email: user.email,
-            role: role,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        
-        showToast(`Account created! You have been assigned the '${role}' role.`, 'success');
-
+        await auth.createUserWithEmailAndPassword(email, password);
+        // onAuthStateChanged will handle creating the user profile
     } catch (error) {
         showAuthError(error.message);
     } finally {
@@ -1978,12 +1616,12 @@ document.addEventListener('DOMContentLoaded', function () {
     auth.onAuthStateChanged(async (user) => {
         if (user) {
             // User is signed in.
-            setLoading(true, 'Loading user data...');
-            const userDoc = await loadDataFromFirestore('users', user.uid);
+            setLoading(true, 'Verifying user...');
+            const userProfile = await getOrCreateUserProfile(user);
             
             appState.currentUser.uid = user.uid;
             appState.currentUser.email = user.email;
-            appState.currentUser.role = userDoc ? userDoc.role : 'salesfloor'; // Default to least privilege
+            appState.currentUser.role = userProfile.role;
 
             userEmailSpan.textContent = user.email;
             userInfoDiv.classList.remove('hidden');
@@ -2008,6 +1646,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Auth Event Listeners
     getEl('login-btn').addEventListener('click', handleSignIn);
+    getEl('google-login-btn').addEventListener('click', handleGoogleSignIn);
     getEl('signup-btn').addEventListener('click', handleSignUp);
     getEl('logout-btn').addEventListener('click', handleSignOut);
 
@@ -2108,4 +1747,3 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 });
 // --- END: Main Execution ---
-
