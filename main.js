@@ -1779,16 +1779,15 @@ document.addEventListener('DOMContentLoaded', function () {
             appState.currentUser.role = userProfile.role;
             appState.currentUser.homeSiteId = userProfile.homeSiteId || null;
 
-            userEmailSpan.textContent = user.email;
+            if(userEmailSpan) {
+                userEmailSpan.textContent = user.email;
+            }
             userInfoDiv.classList.remove('hidden');
             
             authContainer.classList.add('hidden');
             appContainer.classList.remove('hidden');
             
             adjustUiForRole(appState.currentUser.role);
-            
-            // Add other event listeners only after user is logged in and UI is visible
-            initializeEventListeners();
             
             await initializeAppForUser();
             checkFiles();
@@ -1803,6 +1802,9 @@ document.addEventListener('DOMContentLoaded', function () {
             userInfoDiv.classList.add('hidden');
         }
     });
+    
+    // Moved initializeEventListeners out of onAuthStateChanged to prevent duplication
+    initializeEventListeners();
 });
 
 function initializeEventListeners() {
