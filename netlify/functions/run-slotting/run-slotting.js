@@ -57,8 +57,25 @@ function parseItemString(itemString) {
 
 // This is the main handler for our Netlify Function.
 exports.handler = async (event, context) => {
+  // Set CORS headers to allow requests from any origin.
+  // For production, you might want to restrict this to your Netlify domain.
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS'
+  };
+
+  // Handle preflight OPTIONS request for CORS
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+        statusCode: 204,
+        headers,
+        body: ''
+    };
+  }
+
   if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: 'Method Not Allowed' };
+    return { statusCode: 405, body: 'Method Not Allowed', headers };
   }
 
   const admin = initializeFirebaseAdmin();
@@ -67,7 +84,7 @@ exports.handler = async (event, context) => {
   // Verify the user's token to ensure they are authenticated.
   const token = event.headers.authorization?.split('Bearer ')[1];
   if (!token) {
-    return { statusCode: 401, body: 'Unauthorized: No token provided.' };
+    return { statusCode: 401, body: 'Unauthorized: No token provided.', headers };
   }
 
   let decodedToken;
@@ -75,7 +92,7 @@ exports.handler = async (event, context) => {
     decodedToken = await admin.auth().verifyIdToken(token);
   } catch (error) {
     console.error("Error verifying token:", error);
-    return { statusCode: 401, body: 'Unauthorized: Invalid token.' };
+    return { statusCode: 401, body: 'Unauthorized: Invalid token.', headers };
   }
   
   const uid = decodedToken.uid;
@@ -83,7 +100,7 @@ exports.handler = async (event, context) => {
 
   // Check if the user has the 'manager' role.
   if (!userDoc.exists || userDoc.data().role !== 'manager') {
-    return { statusCode: 403, body: 'Permission Denied: Only managers can run this process.' };
+    return { statusCode: 403, body: 'Permission Denied: Only managers can run this process.', headers };
   }
 
   const { inventoryData, poData, previousSlottingData, settings, cushionData, exclusionKeywords } = JSON.parse(event.body);
@@ -305,6 +322,7 @@ exports.handler = async (event, context) => {
   // Return the results to the frontend.
   return {
     statusCode: 200,
+    headers,
     body: JSON.stringify({
       finalSlottedData: backroom,
       unslottedItems: unslottedItems,
