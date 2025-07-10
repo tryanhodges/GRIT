@@ -12,7 +12,6 @@ const firebaseConfig = {
 };
 
 
-
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
@@ -307,7 +306,6 @@ async function saveSettings() {
 
 function searchAndRender() {
     const searchTerm = getEl('searchInput').value;
-    getEl('searchClearBtn').style.display = searchTerm ? 'flex' : 'none';
     renderUI();
 }
 
@@ -1514,14 +1512,10 @@ function adjustUiForRole(role) {
     });
 
     // Explicitly enable/disable controls based on role
-    getEl('slotBtn').disabled = !isManager;
     getEl('add-cushion-level-btn').disabled = !isManager;
     getEl('add-exclusion-btn').disabled = !isManager;
-    getEl('save-settings-btn').disabled = !isManager;
-
-    // Disable settings inputs for non-managers
-    const settingsInputs = document.querySelectorAll('#settings-modal input, #settings-modal select');
-    settingsInputs.forEach(input => input.disabled = !isManager);
+    
+    updateUiForSiteSelection();
 }
 
 async function renderUserManagementModal() {
@@ -1615,7 +1609,7 @@ async function loadSites() {
     const selector = getEl('site-selector');
     selector.innerHTML = '';
     if (appState.sites.length === 0) {
-        selector.innerHTML = '<option>No sites available</option>';
+        selector.innerHTML = '<option value="">No sites available</option>';
     } else {
         appState.sites.forEach(site => {
             const option = document.createElement('option');
@@ -1633,7 +1627,7 @@ async function createNewSite() {
         showToast("Please enter a site name.", "error");
         return;
     }
-    const siteId = siteName.toLowerCase().replace(/\s+/g, '-');
+    const siteId = siteName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
     
     setLoading(true, `Creating site: ${siteName}...`);
     try {
@@ -1650,15 +1644,36 @@ async function createNewSite() {
 }
 
 async function deleteSite(siteId, siteName) {
-    showConfirmationModal('Delete Site?', `Are you sure you want to delete ${siteName}? All associated data (settings, slotting, POs) will be permanently lost.`, async () => {
+    showConfirmationModal('Delete Site?', `Are you sure you want to delete ${siteName}? All associated data will be permanently lost.`, async () => {
         setLoading(true, `Deleting site: ${siteName}...`);
         try {
             await deleteDocument('sites', siteId);
-            // In a real-world app, you would use a Cloud Function to delete all subcollections.
-            // For now, we just delete the main site doc.
+            // In a real-world app, a Cloud Function would be needed to delete all subcollections.
             showToast("Site deleted successfully.", "success");
-            await loadSites();
-            renderSiteManagementModal();
+            
+            // If the deleted site was the selected one, reset the selection.
+            if (appState.selectedSiteId === siteId) {
+                appState.selectedSiteId = null;
+            }
+            
+            await loadSites(); // Refresh site list in the dropdown
+            renderSiteManagementModal(); // Re-render the modal list
+
+            // If there are other sites, select the first one. Otherwise, clear the view.
+            if (appState.sites.length > 0) {
+                const siteSelector = getEl('site-selector');
+                siteSelector.value = appState.sites[0].id;
+                appState.selectedSiteId = appState.sites[0].id;
+                await initializeFromStorage();
+            } else {
+                appState.selectedSiteId = null;
+                // Clear the UI
+                getEl('visualization-container').innerHTML = '';
+                getEl('overview-controls').classList.add('hidden');
+                getEl('overviewSubtitle').textContent = 'No sites found. A manager must create a site to begin.';
+                getEl('overviewSubtitle').classList.remove('hidden');
+                updateUiForSiteSelection();
+            }
         } catch (error) {
             showToast("Error deleting site.", "error");
         } finally {
@@ -1669,8 +1684,8 @@ async function deleteSite(siteId, siteName) {
 
 async function setHomeSite() {
     const selectedSiteId = getEl('site-selector').value;
-    if (!selectedSiteId) {
-        showToast("Please select a site first.", "error");
+    if (!selectedSiteId || appState.sites.length === 0) {
+        showToast("Please select a valid site first.", "error");
         return;
     }
     
@@ -1875,3 +1890,4 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 });
 // --- END: Main Execution ---
+
