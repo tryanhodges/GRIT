@@ -303,8 +303,38 @@ async function saveSettings() {
     setLoading(false);
 }
 
-function searchAndRender() {
-    renderUI();
+async function executeSearch() {
+    const searchTerm = getEl('searchInput').value.toLowerCase().trim();
+    if (!searchTerm) {
+        // If search is cleared, reload data for the current site
+        await initializeFromStorage();
+        return;
+    }
+
+    setLoading(true, `Searching all sites for "${searchTerm}"...`);
+    try {
+        // This is a simplified search. A real-world app would use a dedicated search service like Algolia or Typesense.
+        const querySnapshot = await db.collectionGroup('slotting').get();
+        let searchResults = {};
+        querySnapshot.forEach(doc => {
+            const data = doc.data().data;
+            for (const loc in data) {
+                const item = data[loc];
+                const itemText = `${item.Brand} ${item.Model} ${item.Color} ${item.Size}`.toLowerCase();
+                if (itemText.includes(searchTerm)) {
+                    searchResults[loc] = item;
+                }
+            }
+        });
+        appState.finalSlottedData = searchResults;
+        renderUI();
+        showToast(`${Object.keys(searchResults).length} items found across all sites.`);
+    } catch (error) {
+        console.error("Error during global search:", error);
+        showToast("An error occurred during search.", "error");
+    } finally {
+        setLoading(false);
+    }
 }
 
 function clearFilters() {
@@ -1791,7 +1821,7 @@ function initializeEventListeners() {
     getEl('downloadUnslottedBtn').addEventListener('click', downloadUnslottedCSV);
 
 
-    getEl('search-btn').addEventListener('click', searchAndRender);
+    getEl('search-btn').addEventListener('click', executeSearch);
     getEl('clearInventoryBtn').addEventListener('click', clearLoadedInventory);
     getEl('clearPOsBtn').addEventListener('click', clearLoadedPOs);
     getEl('add-exclusion-btn').addEventListener('click', addExclusionKeyword);
