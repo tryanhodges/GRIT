@@ -12,7 +12,6 @@ const firebaseConfig = {
 };
 
 
-
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
@@ -192,8 +191,8 @@ async function clearAllPOData() {
     });
 }
 
-async function initializeFromStorage(siteId) {
-    if (!siteId) {
+async function initializeFromStorage() {
+    if (!appState.selectedSiteId) {
         console.error("No site selected, cannot load data.");
         getEl('overviewSubtitle').textContent = 'Please select a site to begin.';
         return;
@@ -204,7 +203,7 @@ async function initializeFromStorage(siteId) {
     appState.finalSlottedData = {};
     appState.unslottedItems = [];
     
-    const settingsPath = `sites/${siteId}/configs/mainSettings`;
+    const settingsPath = `sites/${appState.selectedSiteId}/configs/mainSettings`;
     const storedSettings = await loadDataFromFirestore(settingsPath.split('/')[0], settingsPath.split('/')[1]);
 
     if (storedSettings) {
@@ -226,7 +225,7 @@ async function initializeFromStorage(siteId) {
         updateColorState();
     }
 
-    const slottingData = await loadDataFromFirestore(`sites/${siteId}/slotting`, 'current');
+    const slottingData = await loadDataFromFirestore(`sites/${appState.selectedSiteId}/slotting`, 'current');
     if (slottingData) {
         appState.finalSlottedData = slottingData.data || {};
         appState.unslottedItems = slottingData.unslotted || [];
@@ -238,14 +237,14 @@ async function initializeFromStorage(siteId) {
         appState.modelCushionAssignments = cushionData.assignments || {};
     }
 
-    const poSnapshot = await db.collection(`sites/${siteId}/purchaseOrders`).get();
+    const poSnapshot = await db.collection(`sites/${appState.selectedSiteId}/purchaseOrders`).get();
     appState.loadedPOs = {};
     poSnapshot.forEach(doc => {
         appState.loadedPOs[doc.id] = doc.data();
     });
     renderPODetails();
 
-    const exclusionData = await loadDataFromFirestore(`sites/${siteId}/configs`, 'exclusionKeywords');
+    const exclusionData = await loadDataFromFirestore(`sites/${appState.selectedSiteId}/configs`, 'exclusionKeywords');
     if (exclusionData) {
         appState.exclusionKeywords = exclusionData.keywords || [];
     }
@@ -1751,6 +1750,20 @@ document.addEventListener('DOMContentLoaded', function () {
             userManagementModal.classList.remove('visible');
         }
     });
+
+    // Site Management Modal Logic
+    const siteManagementModal = getEl('site-management-modal');
+    getEl('open-site-management-btn').addEventListener('click', () => {
+        // renderSiteManagementModal(); // We'll need to create this function
+        siteManagementModal.classList.add('visible');
+    });
+    getEl('close-site-management-btn').addEventListener('click', () => siteManagementModal.classList.remove('visible'));
+    siteManagementModal.addEventListener('click', (e) => {
+        if (e.target === siteManagementModal) {
+            siteManagementModal.classList.remove('visible');
+        }
+    });
+
 
     // Global click listener to close dropdowns/modals
     document.addEventListener('click', (e) => {
