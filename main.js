@@ -1,11 +1,23 @@
-// --- START: Application State and Constants ---
-const STORAGE_KEYS = {
-    POS: 'gho_po_data',
-    SETTINGS: 'gho_settings_data',
-    EXCLUSIONS: 'gho_exclusion_keywords',
-    CUSHION_DATA: 'gho_cushion_data'
+// --- START: Firebase Configuration ---
+// TODO: Add your Firebase project configuration here
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyCb31JTu267sVk65VG--Grlp14w6cpkq2c",
+  authDomain: "grit-7fb60.firebaseapp.com",
+  projectId: "grit-7fb60",
+  storageBucket: "grit-7fb60.firebasestorage.app",
+  messagingSenderId: "278201731023",
+  appId: "1:278201731023:web:b1f4c1662a427dcabcb4ba",
+  measurementId: "G-LJ16FE68W4"
 };
 
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+// --- END: Firebase Configuration ---
+
+
+// --- START: Application State and Constants ---
 const appState = {
     finalSlottedData: {},
     unslottedItems: [],
@@ -54,24 +66,39 @@ function setLoading(isLoading, message = '') {
     getEl('loading-message').textContent = message;
 }
 
-// --- LocalStorage Functions ---
-const saveDataToStorage = (key, data) => {
+// --- Firestore Data Functions ---
+async function saveDataToFirestore(collection, docId, data) {
     try {
-        localStorage.setItem(key, JSON.stringify(data));
+        await db.collection(collection).doc(docId).set(data);
     } catch (e) {
-        console.error("Error saving to localStorage", e);
-        showToast("Error saving data. Storage might be full.", "error");
+        console.error("Error saving to Firestore", e);
+        showToast("Error saving data to the cloud.", "error");
     }
-};
-const loadDataFromStorage = (key) => {
+}
+
+async function loadDataFromFirestore(collection, docId) {
     try {
-        const data = localStorage.getItem(key);
-        return data ? JSON.parse(data) : null;
+        const doc = await db.collection(collection).doc(docId).get();
+        if (doc.exists) {
+            return doc.data();
+        }
+        return null;
     } catch (e) {
-        console.error("Error loading from localStorage", e);
+        console.error("Error loading from Firestore", e);
+        showToast("Error loading data from the cloud.", "error");
         return null;
     }
-};
+}
+
+async function clearCollection(collectionName) {
+    const snapshot = await db.collection(collectionName).get();
+    const batch = db.batch();
+    snapshot.docs.forEach(doc => {
+        batch.delete(doc.ref);
+    });
+    await batch.commit();
+}
+
 
 // --- Event Handlers and Initialization ---
 function handleFileChange(event, nameElementId) {
@@ -112,16 +139,25 @@ function clearLoadedPOs() {
     showToast("Loaded PO files cleared.", "info");
 }
 
-function clearAllPOData() {
-    if (confirm("Are you sure you want to clear ALL saved PO records? This action cannot be undone and will require a page reload.")) {
-        localStorage.removeItem(STORAGE_KEYS.POS);
-        showToast("All PO records cleared. Reloading...", "success");
-        setTimeout(() => location.reload(), 1000);
+async function clearAllPOData() {
+    if (confirm("Are you sure you want to clear ALL saved PO records from the database? This action cannot be undone.")) {
+        setLoading(true, 'Deleting POs...');
+        try {
+            await clearCollection('purchaseOrders');
+            appState.loadedPOs = {};
+            renderPODetails();
+            showToast("All PO records cleared from the database.", "success");
+        } catch (e) {
+            showToast("Error clearing POs.", "error");
+        } finally {
+            setLoading(false);
+        }
     }
 }
 
-function initializeFromStorage() {
-    const storedSettings = loadDataFromStorage(STORAGE_KEYS.SETTINGS);
+async function initializeFromStorage() {
+    setLoading(true, "Loading data from cloud...");
+    const storedSettings = await loadDataFromFirestore('configs', 'mainSettings');
     if (storedSettings) {
         // Layout
         getEl('rackCount').value = storedSettings.rackCount || 26;
@@ -144,21 +180,28 @@ function initializeFromStorage() {
         updateColorState(); // Apply loaded colors
     }
 
-    const cushionData = loadDataFromStorage(STORAGE_KEYS.CUSHION_DATA);
+    const cushionData = await loadDataFromFirestore('configs', 'cushionData');
     if(cushionData) {
         appState.cushionLevels = cushionData.levels || [];
         appState.modelCushionAssignments = cushionData.assignments || {};
     }
 
-    // Slotting data is no longer loaded from memory
-    appState.loadedPOs = loadDataFromStorage(STORAGE_KEYS.POS) || {};
+    const poSnapshot = await db.collection('purchaseOrders').get();
+    poSnapshot.forEach(doc => {
+        appState.loadedPOs[doc.id] = doc.data();
+    });
     if (Object.keys(appState.loadedPOs).length > 0) {
         renderPODetails();
     }
 
-    appState.exclusionKeywords = loadDataFromStorage(STORAGE_KEYS.EXCLUSIONS) || [];
+    const exclusionData = await loadDataFromFirestore('configs', 'exclusionKeywords');
+    if (exclusionData) {
+        appState.exclusionKeywords = exclusionData.keywords || [];
+    }
+    
     renderExclusionList();
     renderCushionUI();
+    setLoading(false);
 }
 
 function updateColorState() {
@@ -175,7 +218,8 @@ function updateColorState() {
     appState.cushionIndicatorColor = getEl('colorCushion').value;
 }
 
-function saveSettings() {
+async function saveSettings() {
+    setLoading(true, "Saving settings...");
     updateColorState();
     appState.userInitials = getEl('userInitials').value.toUpperCase();
     const settings = {
@@ -189,21 +233,29 @@ function saveSettings() {
         colorMap: appState.colorMap,
         cushionIndicatorColor: appState.cushionIndicatorColor
     };
-    saveDataToStorage(STORAGE_KEYS.SETTINGS, settings);
-    saveCushionData();
-    showToast('Settings saved!', 'success');
+    await saveDataToFirestore('configs', 'mainSettings', settings);
+    await saveCushionData();
+    showToast('Settings saved to cloud!', 'success');
     renderUI(); // Re-render to apply color changes immediately
     renderMetricsPanel(); // Re-render chart with new colors
     renderCushionUI(); // Re-render cushion tab with new colors
+    setLoading(false);
 }
 
-function clearAllStoredData() {
-    if (confirm("Are you sure you want to clear all saved Settings and Exclusions? This cannot be undone.")) {
-        localStorage.removeItem(STORAGE_KEYS.SETTINGS);
-        localStorage.removeItem(STORAGE_KEYS.EXCLUSIONS);
-        localStorage.removeItem(STORAGE_KEYS.CUSHION_DATA);
-        showToast("All saved settings and exclusions cleared. Reloading...", "success");
-        setTimeout(() => location.reload(), 1000);
+async function clearAllStoredData() {
+    if (confirm("Are you sure you want to clear all saved Settings and Exclusions from the database? This cannot be undone.")) {
+        setLoading(true, 'Deleting settings...');
+        try {
+            await db.collection('configs').doc('mainSettings').delete();
+            await db.collection('configs').doc('cushionData').delete();
+            await db.collection('configs').doc('exclusionKeywords').delete();
+            showToast("All saved settings and exclusions cleared from the database. Reloading...", "success");
+            setTimeout(() => location.reload(), 1500);
+        } catch(e) {
+            showToast("Error clearing settings.", "error");
+        } finally {
+            setLoading(false);
+        }
     }
 }
 
@@ -355,8 +407,8 @@ function resetSelect(selectEl, defaultText) {
 // --- Core Application Logic ---
 async function runSlottingProcess() {
     setLoading(true, 'Initializing...');
-    saveCushionData(); // Save any pending cushion changes before running
-    saveSettings(); // Save settings on run
+    await saveCushionData(); // Save any pending cushion changes before running
+    await saveSettings(); // Save settings on run
     
     try {
         setLoading(true, 'Reading files and data...');
@@ -440,8 +492,13 @@ async function runSlottingProcess() {
         
         appState.finalSlottedData = backroom;
         appState.unslottedItems = unslottedItems;
-
-        saveDataToStorage(STORAGE_KEYS.POS, appState.loadedPOs);
+        
+        const batch = db.batch();
+        Object.values(appState.loadedPOs).forEach(po => {
+            const poRef = db.collection('purchaseOrders').doc(po.items[0].UniqueID.split('-PO-')[0]);
+            batch.set(poRef, po);
+        });
+        await batch.commit();
 
         setLoading(true, 'Rendering visualization...');
         await new Promise(r => setTimeout(r, 50));
@@ -684,8 +741,9 @@ async function parsePOFiles(fileList) {
         }
 
         if (poItems.length > 0) {
-            const currentPOState = appState.loadedPOs[file.name] || {};
-            appState.loadedPOs[file.name] = {
+            const poKey = file.name;
+            const currentPOState = appState.loadedPOs[poKey] || {};
+            appState.loadedPOs[poKey] = {
                 brand,
                 itemCount: poItems.length,
                 loadedDate: currentPOState.loadedDate || new Date().toLocaleDateString(),
@@ -896,7 +954,7 @@ function generateSlotting(itemsToSlot, existingBackroom) {
 }
 
 // --- Rendering Functions ---
-function renderPODetails() {
+async function renderPODetails() {
     const container = getEl('po-list-container');
     const summaryEl = getEl('po-summary');
     container.innerHTML = '';
@@ -939,7 +997,7 @@ function renderPODetails() {
     });
 }
 
-function markPOAsReceived(poKey) {
+async function markPOAsReceived(poKey) {
     const poData = appState.loadedPOs[poKey];
     if (!poData || poData.status === 'received') return;
 
@@ -951,8 +1009,8 @@ function markPOAsReceived(poKey) {
             appState.finalSlottedData[loc].Type = 'Inventory';
         }
     }
-
-    saveDataToStorage(STORAGE_KEYS.POS, appState.loadedPOs);
+    
+    await saveDataToFirestore('purchaseOrders', poKey, poData);
     renderPODetails();
     renderUI();
     renderMetricsPanel();
@@ -1319,12 +1377,12 @@ function renderExclusionList() {
     });
 }
 
-function addExclusionKeyword() {
+async function addExclusionKeyword() {
     const input = getEl('exclusion-keyword-input');
     const keyword = input.value.trim();
     if (keyword && !appState.exclusionKeywords.includes(keyword)) {
         appState.exclusionKeywords.push(keyword);
-        saveDataToStorage(STORAGE_KEYS.EXCLUSIONS, appState.exclusionKeywords);
+        await saveDataToFirestore('configs', 'exclusionKeywords', { keywords: appState.exclusionKeywords });
         renderExclusionList();
         showToast(`'${keyword}' added to exclusions.`, 'success');
         input.value = '';
@@ -1335,28 +1393,28 @@ function addExclusionKeyword() {
     }
 }
 
-function removeExclusionKeyword(keyword) {
+async function removeExclusionKeyword(keyword) {
     appState.exclusionKeywords = appState.exclusionKeywords.filter(kw => kw !== keyword);
-    saveDataToStorage(STORAGE_KEYS.EXCLUSIONS, appState.exclusionKeywords);
+    await saveDataToFirestore('configs', 'exclusionKeywords', { keywords: appState.exclusionKeywords });
     renderExclusionList();
     showToast(`'${keyword}' removed from exclusions.`, 'info');
 }
 
 // --- Cushion Sorting Functions ---
-function saveCushionData() {
+async function saveCushionData() {
     const dataToSave = {
         levels: appState.cushionLevels,
         assignments: appState.modelCushionAssignments
     };
-    saveDataToStorage(STORAGE_KEYS.CUSHION_DATA, dataToSave);
+    await saveDataToFirestore('configs', 'cushionData', dataToSave);
 }
 
-function addCushionLevel() {
+async function addCushionLevel() {
     const input = getEl('cushion-level-input');
     const level = input.value.trim();
     if (level && !appState.cushionLevels.includes(level)) {
         appState.cushionLevels.push(level);
-        saveCushionData();
+        await saveCushionData();
         renderCushionUI();
         input.value = '';
         showToast(`Cushion level '${level}' added.`, 'success');
@@ -1367,7 +1425,7 @@ function addCushionLevel() {
     }
 }
 
-function removeCushionLevel(levelToRemove) {
+async function removeCushionLevel(levelToRemove) {
     appState.cushionLevels = appState.cushionLevels.filter(level => level !== levelToRemove);
     // Also remove any assignments that used this level
     for (const model in appState.modelCushionAssignments) {
@@ -1375,7 +1433,7 @@ function removeCushionLevel(levelToRemove) {
             delete appState.modelCushionAssignments[model];
         }
     }
-    saveCushionData();
+    await saveCushionData();
     renderCushionUI();
     showToast(`Cushion level '${levelToRemove}' removed.`, 'info');
 }
@@ -1509,10 +1567,10 @@ function renderCushionUI() {
         }
     });
 
-    list.addEventListener('drop', () => {
+    list.addEventListener('drop', async () => {
         const newOrder = Array.from(list.querySelectorAll('.cushion-level-item')).map(item => item.dataset.level);
         appState.cushionLevels = newOrder;
-        saveCushionData();
+        await saveCushionData();
         renderCushionUI(); // Re-render to update model assignment dropdowns and swatches
         showToast('Cushion priority updated.', 'success');
     });
