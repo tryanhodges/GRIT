@@ -158,6 +158,20 @@
         </div>
         <!-- END: Settings Modal -->
 
+        <!-- START: User Management Modal -->
+        <div id="user-management-modal" class="modal-overlay">
+            <div class="modal-content">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">User Management</h2>
+                    <button id="close-user-management-btn" class="text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
+                </div>
+                <div id="user-list-container" class="space-y-3">
+                    <!-- User list will be rendered here -->
+                </div>
+            </div>
+        </div>
+        <!-- END: User Management Modal -->
+
         <div class="max-w-7xl mx-auto">
             <!-- START: Control Panel -->
             <div class="bg-white p-6 rounded-xl shadow-md mb-8">
@@ -209,6 +223,9 @@
                                     <a href="#" id="poTemplateBtn" class="block px-4 py-2 text-sm text-indigo-600 hover:bg-gray-100">PO</a>
                                 </div>
                             </div>
+                             <button id="open-user-management-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600 manager-only">
+                                <span class="material-symbols-outlined">manage_accounts</span>
+                            </button>
                              <button id="open-settings-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600">
                                 <span class="material-symbols-outlined">settings</span>
                             </button>
@@ -308,7 +325,7 @@
                             </div>
                         </div>
                     </div>
-
+                    
                     <!-- Tab 4: Unslotted Items -->
                     <div id="tab-unslotted" class="tab-content">
                          <div class="flex justify-between items-center mb-4">

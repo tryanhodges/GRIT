@@ -218,6 +218,7 @@ async function initializeFromStorage() {
     }
 
     const poSnapshot = await db.collection('purchaseOrders').get();
+    appState.loadedPOs = {}; // Reset before loading
     poSnapshot.forEach(doc => {
         appState.loadedPOs[doc.id] = doc.data();
     });
@@ -1792,7 +1793,7 @@ function handleDrop(e) {
 }
 // --- END: Drag and Drop Handlers ---
 
-// --- START: Auth Functions ---
+// --- START: Auth & User Management Functions ---
 function showAuthError(message) {
     const errorDiv = getEl('auth-error');
     errorDiv.textContent = message;
@@ -1829,7 +1830,7 @@ async function handleSignUp() {
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         
-        showToast(`Account created! You are a ${role}.`, 'success');
+        showToast(`Account created! You have been assigned the '${role}' role.`, 'success');
 
     } catch (error) {
         showAuthError(error.message);
@@ -1875,6 +1876,90 @@ function adjustUiForRole(role) {
     getEl('add-cushion-level-btn').disabled = role !== 'manager';
     getEl('add-exclusion-btn').disabled = role !== 'manager';
 }
+
+async function renderUserManagementModal() {
+    const container = getEl('user-list-container');
+    container.innerHTML = '<div class="spinner"></div>'; // Show loader
+    
+    try {
+        const usersSnapshot = await db.collection('users').get();
+        container.innerHTML = '';
+        if (usersSnapshot.empty) {
+            container.innerHTML = '<p class="text-gray-500">No other users found.</p>';
+            return;
+        }
+
+        usersSnapshot.docs.forEach(doc => {
+            const user = doc.data();
+            const userId = doc.id;
+            
+            const userEl = document.createElement('div');
+            userEl.className = 'flex justify-between items-center p-3 rounded-lg bg-gray-50 border';
+            
+            const emailSpan = `<span class="font-semibold">${user.email}</span>`;
+            const selfLabel = userId === appState.currentUser.uid ? '<span class="text-xs font-bold text-indigo-600 ml-2">(You)</span>' : '';
+            
+            const roleSelect = `
+                <select data-uid="${userId}" class="role-select border-gray-300 rounded-md shadow-sm" ${userId === appState.currentUser.uid ? 'disabled' : ''}>
+                    <option value="salesfloor" ${user.role === 'salesfloor' ? 'selected' : ''}>Salesfloor</option>
+                    <option value="manager" ${user.role === 'manager' ? 'selected' : ''}>Manager</option>
+                </select>
+            `;
+            
+            const deleteBtn = `<button data-uid="${userId}" data-email="${user.email}" class="delete-user-btn text-red-500 hover:text-red-700 disabled:opacity-50" ${userId === appState.currentUser.uid ? 'disabled' : ''}>&times;</button>`;
+            
+            userEl.innerHTML = `
+                <div>${emailSpan} ${selfLabel}</div>
+                <div class="flex items-center gap-4">${roleSelect} ${deleteBtn}</div>
+            `;
+            container.appendChild(userEl);
+        });
+
+        // Add event listeners after rendering
+        document.querySelectorAll('.role-select').forEach(select => {
+            select.addEventListener('change', (e) => updateUserRole(e.target.dataset.uid, e.target.value));
+        });
+        document.querySelectorAll('.delete-user-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => deleteUser(e.target.dataset.uid, e.target.dataset.email));
+        });
+
+    } catch (error) {
+        console.error("Error fetching users:", error);
+        container.innerHTML = '<p class="text-red-500">Could not load user list.</p>';
+    }
+}
+
+async function updateUserRole(uid, newRole) {
+    setLoading(true, `Updating role to ${newRole}...`);
+    try {
+        await db.collection('users').doc(uid).update({ role: newRole });
+        showToast("User role updated successfully.", "success");
+    } catch (error) {
+        console.error("Error updating role:", error);
+        showToast("Failed to update user role.", "error");
+    } finally {
+        setLoading(false);
+    }
+}
+
+async function deleteUser(uid, email) {
+    showConfirmationModal('Delete User?', `Are you sure you want to delete the user ${email}? This will remove their access permanently.`, async () => {
+        setLoading(true, `Deleting user ${email}...`);
+        try {
+            // This only deletes the Firestore record, not the actual Firebase Auth user.
+            // A Cloud Function is required to delete the auth user securely.
+            await db.collection('users').doc(uid).delete();
+            showToast("User record deleted. They can no longer log in with a role.", "success");
+            renderUserManagementModal(); // Refresh the list
+        } catch (error) {
+            console.error("Error deleting user record:", error);
+            showToast("Failed to delete user record.", "error");
+        } finally {
+            setLoading(false);
+        }
+    });
+}
+
 
 // --- START: Main Execution ---
 document.addEventListener('DOMContentLoaded', function () {
@@ -1990,6 +2075,18 @@ document.addEventListener('DOMContentLoaded', function () {
     getEl('clearStorageBtn').addEventListener('click', clearAllStoredData);
     getEl('clearAllPOsBtn').addEventListener('click', clearAllPOData);
 
+    // User Management Modal Logic
+    const userManagementModal = getEl('user-management-modal');
+    getEl('open-user-management-btn').addEventListener('click', () => {
+        renderUserManagementModal(); // Re-fetch users every time it's opened
+        userManagementModal.classList.add('visible');
+    });
+    getEl('close-user-management-btn').addEventListener('click', () => userManagementModal.classList.remove('visible'));
+    userManagementModal.addEventListener('click', (e) => {
+        if (e.target === userManagementModal) {
+            userManagementModal.classList.remove('visible');
+        }
+    });
 
     // Global click listener to close dropdowns/modals
     document.addEventListener('click', (e) => {
@@ -2004,4 +2101,5 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 });
 // --- END: Main Execution ---
+
 
