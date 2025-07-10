@@ -1,9 +1,0 @@
-{
-  "name": "run-slotting-function",
-  "version": "1.0.0",
-  "description": "Netlify function for GRIT slotting logic.",
-  "main": "run-slotting.js",
-  "dependencies": {
-    "firebase-admin": "^10.0.2"
-  }
-}
