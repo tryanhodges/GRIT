@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Backroom Inventory Slotting System V6.0 (Web App)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js Library -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- PDF Generation Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="p-4 md:p-8">
+
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <p id="loading-message" class="text-white mt-4 font-semibold"></p>
+    </div>
+    <div id="toast-container"></div>
+
+    <!-- START: Settings Modal -->
+    <div id="settings-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">Settings</h2>
+                <button id="close-settings-btn" class="text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
+            </div>
+            <div class="space-y-8">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                    <div>
+                        <h3 class="section-title">Rack Layout</h3>
+                        <div class="space-y-4 pt-2">
+                            <div>
+                                <div class="flex items-center gap-4">
+                                    <label for="sectionsPerRack" class="font-medium text-gray-700 w-36">Sections Per Rack:</label>
+                                    <input type="number" id="sectionsPerRack" value="8" class="w-24 border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                                </div>
+                                <p id="sections-error" class="text-red-500 text-xs mt-1 hidden">Must be an even number.</p>
+                            </div>
+                            <div class="flex items-center gap-4">
+                                <label for="stacksPerSection" class="font-medium text-gray-700 w-36">Stacks Per Section:</label>
+                                <input type="number" id="stacksPerSection" value="5" class="w-24 border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                            </div>
+                            <div class="flex items-center gap-4">
+                                <label for="slotsPerStack" class="font-medium text-gray-700 w-36">Slots Per Stack:</label>
+                                <input type="number" id="slotsPerStack" value="5" class="w-24 border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="section-title">General</h3>
+                        <div class="space-y-4 pt-2">
+                            <div class="flex items-center gap-4">
+                                <label for="rackCount" class="font-medium text-gray-700 w-32">Total Racks:</label>
+                                <input type="number" id="rackCount" value="26" class="w-24 border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                            </div>
+                             <div class="flex items-center gap-4">
+                                <label for="userInitials" class="font-medium text-gray-700 w-32">User Initials:</label>
+                                <input type="text" id="userInitials" placeholder="e.g., RH" class="w-24 border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                            </div>
+                             <div class="flex items-center gap-2">
+                                <input type="checkbox" id="includeKids" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                                <label for="includeKids" class="font-medium text-gray-700">Include Kids' Inventory</label>
+                            </div>
+                            <div>
+                                <label for="excludeRacks" class="font-medium text-gray-700">Exclude Racks (comma-separated):</label>
+                                <input type="text" id="excludeRacks" placeholder="e.g., 5, 12, 18" class="w-full mt-1 border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                     <div>
+                        <h3 class="section-title">Visualization Colors</h3>
+                        <div class="space-y-4 pt-2">
+                            <div class="color-picker-wrapper">
+                                <label for="colorMen" class="font-medium text-gray-700 w-36">Men:</label>
+                                <input type="color" id="colorMen" value="#5468C1">
+                                <label for="colorMenPO" class="font-medium text-gray-700 ml-4">PO:</label>
+                                <input type="color" id="colorMenPO" value="#a9b3e0">
+                            </div>
+                             <div class="color-picker-wrapper">
+                                <label for="colorWomen" class="font-medium text-gray-700 w-36">Women:</label>
+                                <input type="color" id="colorWomen" value="#f846f0">
+                                <label for="colorWomenPO" class="font-medium text-gray-700 ml-4">PO:</label>
+                                <input type="color" id="colorWomenPO" value="#fbc2f8">
+                            </div>
+                             <div class="color-picker-wrapper">
+                                <label for="colorKids" class="font-medium text-gray-700 w-36">Kids:</label>
+                                <input type="color" id="colorKids" value="#64d669">
+                                <label for="colorKidsPO" class="font-medium text-gray-700 ml-4">PO:</label>
+                                <input type="color" id="colorKidsPO" value="#b1ebc4">
+                            </div>
+                             <div class="color-picker-wrapper">
+                                <label for="colorCushion" class="font-medium text-gray-700 w-36">Cushion Indicator:</label>
+                                <input type="color" id="colorCushion" value="#6b7280">
+                            </div>
+                        </div>
+                     </div>
+                      <div>
+                        <h3 class="section-title text-red-600 border-red-200">Danger Zone</h3>
+                        <div class="space-y-3 pt-2">
+                            <button id="clearAllPOsBtn" class="clear-storage-btn text-red-500 hover:text-red-700">Clear All PO Records</button>
+                            <br>
+                            <button id="clearStorageBtn" class="clear-storage-btn text-red-500 hover:text-red-700">Clear Saved Settings & Exclusions</button>
+                        </div>
+                     </div>
+                 </div>
+                 <div class="border-t pt-4 flex justify-end">
+                    <button id="save-settings-btn" class="action-btn bg-indigo-600 hover:bg-indigo-700 w-auto px-6">Save & Close</button>
+                 </div>
+            </div>
+        </div>
+    </div>
+    <!-- END: Settings Modal -->
+
+    <div class="max-w-7xl mx-auto">
+        <!-- START: Control Panel -->
+        <div class="bg-white p-6 rounded-xl shadow-md mb-8">
+            <!-- START: Header with Logos -->
+            <div class="flex justify-between items-start mb-6">
+                <div>
+                    <div class="flex items-center gap-3">
+                        <svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="155px" height="125px" version="1.0" shape-rendering="geometricPrecision" text-rendering="geometricPrecision" image-rendering="optimizeQuality" fill-rule="evenodd" clip-rule="evenodd"
+                        viewBox="0 0 155 125"
+                         xmlns:xlink="http://www.w3.org/1999/xlink">
+                         <g id="Layer_x0020_1">
+                          <rect fill="none" x="-0.5" y="0.5" width="155" height="125"/>
+                          <path fill="#00356C" fill-rule="nonzero" d="M134.83 103.01l0 -1.86 4.09 0 2.04 0 4.08 0 0 1.86 -4.08 0 0 12.07 -2.04 0 0 -12.07 -4.09 0zm5.2 -72.64l0 -1.87 2.77 0 1.88 0 0.06 0 0 6.57c-0.27,0.09 -0.76,0.21 -1.44,0.36 -0.69,0.16 -1.48,0.23 -2.36,0.23 -2.08,0 -3.64,-0.6 -4.68,-1.8 -1.04,-1.19 -1.56,-2.98 -1.56,-5.38 0,-2.27 0.54,-4.03 1.62,-5.27 1.08,-1.25 2.59,-1.87 4.54,-1.87 0.97,0 1.83,0.16 2.56,0.46 0.73,0.3 1.27,0.73 1.62,1.29l-1.46 1.45c-0.3,-0.44 -0.68,-0.79 -1.14,-1.03 -0.45,-0.24 -0.94,-0.36 -1.46,-0.36 -1.32,0 -2.35,0.45 -3.08,1.37 -0.73,0.91 -1.1,2.2 -1.1,3.87 0,1.82 0.37,3.19 1.1,4.1 0.73,0.91 1.82,1.37 3.27,1.37 0.62,0 1.16,-0.06 1.63,-0.18l0 -3.31 -2.77 0zm-2.56 24.47l2.74 0c0.78,0 1.38,-0.2 1.82,-0.61 0.43,-0.41 0.65,-0.99 0.65,-1.74 0,-0.82 -0.22,-1.45 -0.65,-1.89 -0.44,-0.44 -1.04,-0.66 -1.82,-0.66l-2.74 0 0 4.9zm0 -6.76l2.74 0c1.44,0 2.56,0.36 3.35,1.09 0.79,0.74 1.18,1.78 1.18,3.13 0,1.39 -0.39,2.48 -1.18,3.25 -0.33,0.33 -0.73,0.59 -1.18,0.77l2.87 5.68 -2.35 0 -2.52 -5.29c-0.06,0 -0.11,0 -0.17,0l-2.74 0 0 5.29 -2.05 0 0 -13.92 1.71 0 0.34 0zm1.44 38.6l0 -10.2 -3.21 0 0 -1.87 3.21 0 2.04 0 3.22 0 0 1.87 -3.22 0 0 10.2 3.22 0 0 1.86 -3.22 0 -2.04 0 -3.21 0 0 -1.86 3.21 0z"/>
+                          <path fill="none" stroke="#FFC220" stroke-width="2.08" stroke-miterlimit="2.61313" d="M33.66 37.78l4.11 -1.9 1.98 0.81 0.07 3.13 31.98 -15 0 -4.83 2.93 -1.33 2.45 1.19 -0.02 4.54 19.51 9.27 0 -2.82 2.04 -0.98 4.18 1.94 -0.01 57.02 -3.26 1.61 -2.55 -1.15 0.04 -3.72 -31.29 14.63 0.11 5.79 -2.99 1.57 -3.19 -1.55 -0.22 -5.59 -19.4 -9.03 0.05 4.08 -1.55 0.74 -4.85 -2.3 -0.12 -56.12zm63.43 27.4l-0.04 11.28 -12.23 -5.61 12.27 -5.67zm-0.06 -22.69l0.1 14.24 -15.26 -7.09 15.16 -7.15zm-57.39 5.26l0 14.11 14.74 -6.88 -14.74 -7.23zm-0.08 22.98l0.15 12.52 13.33 -6.09 -13.48 -6.43z"/>
+                           <polygon fill="#00356C" points="68.68,29.52 81.71,23.44 91.28,27.81 91.28,38.05 78.45,44.06 68.82,39.65 68.71,30.13 "/>
+                           <polygon fill="#018DE2" points="70.21,29.57 81.79,24.18 89.82,27.94 78.25,33.34 "/>
+                           <polygon fill="#84D2FE" points="79.26,34.46 89.89,29.5 89.86,37.38 79.18,42.46 "/>
+                          <polygon fill="#C40808" points="57.99,59.79 71.03,53.71 80.59,58.08 80.59,68.32 67.76,74.33 58.14,69.92 58.02,60.4 "/>
+                          <polygon fill="#FF9E5C" points="59.53,59.84 71.11,54.44 79.13,58.21 67.56,63.61 "/>
+                          <polygon fill="#FF7208" points="68.57,64.73 79.21,59.77 79.17,67.65 68.49,72.73 "/>
+                           <polygon fill="#00356C" points="72.05,74.39 85.09,68.31 94.65,72.68 94.65,82.92 81.82,88.93 72.2,84.53 72.08,75 "/>
+                           <polygon fill="#018DE2" points="73.59,74.45 85.16,69.05 93.19,72.81 81.62,78.21 "/>
+                           <polygon fill="#84D2FE" points="82.63,79.33 93.26,74.37 93.23,82.26 82.55,87.33 "/>
+                          <rect fill="none" stroke="#84D2FE" stroke-width="4.17" stroke-miterlimit="2.61313" x="16.29" y="12.19" width="105.08" height="100.02"/>
+                         </g>
+                        </svg>
+                        <h1 class="text-3xl font-bold text-gray-800">GRIT</h1>
+                    </div>
+                    <span class="text-lg font-semibold text-gray-400">V6.0</span>
+                </div>
+                <div class="flex flex-col items-end">
+                    <div class="flex-shrink-0" style="width: 200px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" version="1.0" shape-rendering="geometricPrecision" text-rendering="geometricPrecision" image-rendering="optimizeQuality" fill-rule="evenodd" clip-rule="evenodd" viewBox="0 0 1000 600">
+                            <g><rect fill="none" width="1000" height="600"/><g><path fill="#373435" d="M131.55 43.5l120.31 0c38.05,0 69.17,31.12 69.17,69.16l0 48.27 -71.58 0 0 -34.4c0,-9.14 -7.47,-16.62 -16.61,-16.62l-80.64 0c-9.14,0 -16.61,7.48 -16.61,16.62l0 191.26c0,9.14 7.47,16.61 16.61,16.61l80.64 0c9.14,0 16.61,-7.47 16.61,-16.61l0 -51.11 -66.95 0 34.12 -64.66c34.85,0 69.38,-0.27 104.41,-0.27l0 131.31c0,38.05 -31.12,69.17 -69.17,69.17l-120.31 0c-38.05,0 -69.17,-31.12 -69.17,-69.17l0 -220.4c0,-38.04 31.12,-69.16 69.17,-69.16z"/><path fill="#373435" d="M733.12 44.69l137.26 0c38.04,0 69.16,31.13 69.16,69.17l0 220.4c0,38.04 -31.12,69.17 -69.16,69.17l-137.26 0c-38.04,0 -69.17,-31.13 -69.17,-69.17l0 -220.4c0,-38.04 31.13,-69.17 69.17,-69.17zm17.55 66.86l102.16 0c8.87,0 16.12,7.26 16.12,16.13l0 192.76c0,8.87 -7.25,16.13 -16.12,16.13l-102.16 0c-8.87,0 -16.13,-7.26 -16.13,-16.13l0 -192.76c0,-8.87 7.26,-16.13 16.13,-16.13z"/><path fill="#373435" d="M566.17 46.6l70.58 0 0 354.03 -43.8 0c-7.27,-10.53 -16.35,-19.66 -26.78,-26.94l0 -108.13 -120.29 0 0 109.02c-9.9,7.13 -18.54,15.95 -25.52,26.05l-45.05 0 0 -135.07 -51.92 0 34.13 -64.66 17.79 0 0 -154.76 70.57 0 0 154.76 120.29 0 0 -154.3z"/><path fill="#373435" d="M94.41 411.72l334.16 0c16.43,-26.24 45.26,-43.64 78.08,-43.64 32.83,0 61.66,17.4 78.09,43.64l317.99 0c18.68,0 33.96,15.28 33.96,33.96l0 37.09c0,18.67 -15.28,33.95 -33.96,33.95l-320.54 0c-16.76,24.07 -44.35,39.78 -75.54,39.78 -31.18,0 -58.77,-15.71 -75.53,-39.78l-336.71 0c-18.67,0 -33.95,-15.28 -33.95,-33.95l0 -37.09c0,-18.68 15.28,-33.96 33.95,-33.96z"/><path fill="white" d="M510.35 399.52c1.46,0.07 2.9,0.2 4.32,0.37l0.61 -1.59 1.33 -3.46 2.25 0.39 2.25 0.4 0.06 3.71 0.03 1.69c1.42,0.33 2.82,0.71 4.2,1.13l0.87 -1.45 1.91 -3.19 2.15 0.78 2.15 0.79 -0.59 3.66 -0.26 1.68c1.33,0.56 2.65,1.18 3.93,1.83l1.12 -1.28 2.43 -2.8 1.98 1.14 1.98 1.15 -1.21 3.51 -0.56 1.61c1.21,0.79 2.4,1.62 3.55,2.49l1.33 -1.08 2.88 -2.34 1.75 1.47 1.76 1.47 -1.81 3.25 -0.83 1.49c1.06,0.99 2.08,2.01 3.07,3.07l1.49 -0.83 3.25 -1.8 1.47 1.75 1.47 1.75 -2.34 2.88 -1.08 1.33c0.87,1.15 1.7,2.34 2.49,3.55l1.62 -0.55 3.51 -1.22 1.14 1.98 1.14 1.98 -2.8 2.44 -1.29 1.11c0.66,1.29 1.27,2.6 1.84,3.94l1.68 -0.27 3.67 -0.58 0.78 2.14 0.78 2.15 -3.19 1.91 -1.45 0.87c0.42,1.38 0.8,2.78 1.12,4.2l1.7 0.03 3.71 0.06 0.4 2.25 0.4 2.25 -3.47 1.33 -1.59 0.61c0.17,1.43 0.3,2.87 0.38,4.32l1.67 0.33 3.65 0.7 0 2.29 -0.01 2.29 -3.64 0.7 -1.67 0.32c-0.08,1.46 -0.2,2.9 -0.38,4.33l1.59 0.61 3.47 1.32 -0.4 2.26 -0.4 2.25 -3.71 0.06 -1.69 0.03c-0.33,1.42 -0.7,2.82 -1.12,4.2l1.44 0.87 3.19 1.91 -0.78 2.14 -0.78 2.15 -3.67 -0.58 -1.67 -0.27c-0.57,1.34 -1.19,2.65 -1.84,3.94l1.28 1.11 2.8 2.44 -1.14 1.97 -1.14 1.98 -3.52 -1.21 -1.6 -0.55c-0.79,1.21 -1.62,2.39 -2.5,3.55l1.08 1.32 2.34 2.89 -1.47 1.75 -1.47 1.75 -3.25 -1.8 -1.49 -0.83c-0.99,1.05 -2.01,2.08 -3.07,3.06l0.83 1.5 1.81 3.25 -1.76 1.47 -1.75 1.46 -2.88 -2.34 -1.33 -1.07c-1.15,0.87 -2.34,1.7 -3.55,2.49l0.56 1.61 1.21 3.51 -1.98 1.14 -1.98 1.15 -2.44 -2.81 -1.11 -1.28c-1.28,0.66 -2.6,1.27 -3.93,1.84l0.26 1.67 0.59 3.67 -2.15 0.78 -2.15 0.78 -1.91 -3.18 -0.87 -1.45c-1.38,0.42 -2.78,0.8 -4.2,1.12l-0.03 1.69 -0.06 3.72 -2.25 0.4 -2.25 0.39 -1.33 -3.47 -0.61 -1.58c-1.43,0.17 -2.86,0.3 -4.32,0.37l-0.32 1.67 -0.71 3.65 -2.29 0 -2.28 0 -0.71 -3.65 -0.32 -1.67c-1.46,-0.07 -2.9,-0.2 -4.33,-0.37l-0.61 1.58 -1.32 3.47 -2.25 -0.39 -2.26 -0.4 -0.06 -3.72 -0.03 -1.68c-1.42,-0.33 -2.82,-0.71 -4.2,-1.13l-0.87 1.45 -1.9 3.18 -2.15 -0.78 -2.15 -0.78 0.58 -3.67 0.27 -1.67c-1.34,-0.56 -2.65,-1.18 -3.94,-1.84l-1.11 1.28 -2.43 2.81 -1.98 -1.15 -1.98 -1.14 1.21 -3.51 0.55 -1.61c-1.21,-0.79 -2.4,-1.62 -3.55,-2.49l-1.32 1.07 -2.89 2.34 -1.75 -1.46 -1.75 -1.47 1.8 -3.25 0.83 -1.5c-1.05,-0.98 -2.08,-2.01 -3.06,-3.06l-1.5 0.83 -3.24 1.8 -1.47 -1.75 -1.47 -1.75 2.34 -2.89 1.07 -1.32c-0.87,-1.16 -1.7,-2.34 -2.49,-3.55l-1.61 0.55 -3.51 1.21 -1.14 -1.98 -1.15 -1.98 2.81 -2.43 1.28 -1.11c-0.66,-1.29 -1.27,-2.6 -1.84,-3.94l-1.67 0.27 -3.67 0.58 -0.78 -2.15 -0.78 -2.14 3.18 -1.91 1.46 -0.88c-0.42,-1.38 -0.8,-2.78 -1.13,-4.19l-1.69 -0.03 -3.72 -0.06 -0.39 -2.25 -0.4 -2.26 3.47 -1.32 1.59 -0.61c-0.18,-1.43 -0.3,-2.87 -0.38,-4.33l-1.67 -0.32 -3.65 -0.71 0 -2.28 0 -2.29 3.65 -0.7 1.67 -0.33c0.08,-1.45 0.2,-2.9 0.37,-4.32l-1.58 -0.61 -3.47 -1.33 0.4 -2.25 0.39 -2.25 3.72 -0.06 1.69 -0.03c0.32,-1.42 0.7,-2.82 1.12,-4.2l-1.45 -0.87 -3.18 -1.91 0.78 -2.15 0.78 -2.14 3.67 0.58 1.67 0.26c0.57,-1.33 1.18,-2.65 1.84,-3.93l-1.28 -1.11 -2.81 -2.44 1.15 -1.98 1.14 -1.98 3.51 1.21 1.61 0.56c0.79,-1.22 1.62,-2.4 2.49,-3.55l-1.07 -1.33 -2.34 -2.88 1.47 -1.75 1.47 -1.75 3.24 1.8 1.5 0.83c0.99,-1.06 2.01,-2.08 3.06,-3.07l-0.82 -1.49 -1.81 -3.25 1.75 -1.47 1.75 -1.47 2.89 2.34 1.33 1.08c1.15,-0.87 2.33,-1.7 3.55,-2.49l-0.56 -1.61 -1.21 -3.51 1.98 -1.15 1.98 -1.14 2.43 2.8 1.12 1.29c1.28,-0.66 2.59,-1.28 3.93,-1.84l-0.27 -1.68 -0.58 -3.66 2.15 -0.79 2.15 -0.78 1.91 3.19 0.87 1.45c1.38,-0.42 2.78,-0.8 4.19,-1.12l0.03 -1.7 0.06 -3.71 2.26 -0.4 2.25 -0.4 1.33 3.47 0.61 1.59c1.42,-0.17 2.86,-0.3 4.32,-0.37l0.32 -1.68 0.71 -3.64 2.28 0 2.29 0 0.71 3.64 0.32 1.68zm-15.42 113.83l2.82 -29.43 -17.16 23.68c4.41,2.59 9.23,4.54 14.34,5.75zm-30.67 -20.68l34.28 -33.75 -0.46 -48.29c-24.7,4.25 -43.49,25.77 -43.49,51.68 0,11.31 3.58,21.79 9.67,30.36zm50.9 -82.18l-0.47 48.43 34.77 34.22c6.3,-8.65 10.02,-19.31 10.02,-30.83 0,-26.2 -19.22,-47.91 -44.32,-51.82zm17.73 97.45l-17.4 -24.02 2.83 29.61c5.18,-1.13 10.09,-3.04 14.57,-5.59z"/></g></g>
+                        </svg>
+                    </div>
+                    <div class="flex items-center gap-2 mt-2">
+                        <!-- Help Icon & Dropdown -->
+                        <div id="help-container" class="relative">
+                            <button id="help-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600">
+                                <span class="material-symbols-outlined">grid_guides</span>
+                            </button>
+                            <div id="help-dropdown" class="hidden absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-20">
+                                <span class="block px-4 py-2 text-sm text-gray-700 font-bold">Download Templates</span>
+                                <a href="#" id="invTemplateBtn" class="block px-4 py-2 text-sm text-indigo-600 hover:bg-gray-100">Inventory</a>
+                                <a href="#" id="poTemplateBtn" class="block px-4 py-2 text-sm text-indigo-600 hover:bg-gray-100">PO</a>
+                            </div>
+                        </div>
+                         <!-- Settings Icon -->
+                         <button id="open-settings-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600">
+                            <span class="material-symbols-outlined">settings</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <!-- END: Header with Logos -->
+
+            <div class="flex items-center border-b border-gray-200">
+                <button class="tab-button active" data-tab="setup">Setup & Slot</button>
+                <button class="tab-button" data-tab="receiving">PO Receiving</button>
+                <button class="tab-button" data-tab="cushion">Cushion Sorting</button>
+                <button class="tab-button" data-tab="unslotted">
+                    Unslotted Items
+                    <span id="unslotted-badge" class="hidden ml-2 bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full"></span>
+                </button>
+                <button class="tab-button" data-tab="exclusions">Item Exclusions</button>
+            </div>
+
+            <div class="pt-6">
+                <!-- Tab 1: Setup & Slot -->
+                <div id="tab-setup" class="tab-content active">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                        <div>
+                            <h2 class="section-title">1. Upload Files</h2>
+                            <div class="space-y-5">
+                                <div id="prevSlottingContainer">
+                                    <label class="file-input-btn">
+                                        Upload Previous Slotting (.csv)
+                                        <input type="file" id="prevSlottingFile" class="hidden" accept=".csv">
+                                    </label>
+                                    <div id="prevSlottingFileName" class="mt-2 text-sm text-gray-500">No file chosen...</div>
+                                </div>
+                                <div>
+                                    <label class="file-input-btn">
+                                        Upload Inventory File(s) (.csv)
+                                        <input type="file" id="inventoryFile" class="hidden" accept=".csv" multiple>
+                                    </label>
+                                    <div id="inventoryFileNames" class="mt-2 text-sm text-gray-500">No files chosen...</div>
+                                    <button id="clearInventoryBtn" class="hidden mt-2 text-sm text-red-600 hover:underline">Clear Loaded Inventory</button>
+                                </div>
+                                <div>
+                                    <label class="file-input-btn">
+                                        Upload New PO(s) (.csv)
+                                        <input type="file" id="poFile" class="hidden" accept=".csv" multiple>
+                                    </label>
+                                    <div id="poFileNames" class="mt-2 text-sm text-gray-500">No files chosen...</div>
+                                    <button id="clearPOsBtn" class="hidden mt-2 text-sm text-red-600 hover:underline">Clear Loaded POs</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <h2 class="section-title">2. Process & Download</h2>
+                            <div class="space-y-4">
+                                <button id="slotBtn" class="action-btn bg-indigo-600 hover:bg-indigo-700" disabled>Slot Inventory</button>
+                                <div class="grid grid-cols-3 gap-2 pt-2">
+                                     <button id="viewToggleBtn" class="action-btn bg-purple-600 hover:bg-purple-700 text-sm" disabled>Detail View</button>
+                                     <button id="downloadPdfBtn" class="action-btn bg-sky-600 hover:bg-sky-700 text-sm" disabled>Inbound PDF</button>
+                                     <button id="downloadCsvBtn" class="action-btn bg-gray-600 hover:bg-gray-700 text-sm" disabled>Slotting Table</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: PO Receiving -->
+                <div id="tab-receiving" class="tab-content">
+                     <h2 class="section-title">Inbound PO Detail</h2>
+                     <div id="po-summary" class="mb-4 text-sm text-gray-700 font-semibold"></div>
+                     <div id="po-list-container" class="mt-2 space-y-3 max-h-96 overflow-y-auto pr-2">
+                         <p class="text-gray-500">No POs loaded.</p>
+                     </div>
+                </div>
+
+                <!-- Tab 3: Cushion Sorting -->
+                <div id="tab-cushion" class="tab-content">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div>
+                            <h3 class="section-title">Cushion Level Priority</h3>
+                             <p class="text-sm text-gray-600 mb-4">Add cushion levels and drag to re-order. The top level gets slotted first.</p>
+                             <div class="flex gap-2 mb-4">
+                                <input type="text" id="cushion-level-input" placeholder="Enter new level..." class="w-full border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                                <button id="add-cushion-level-btn" class="action-btn bg-indigo-600 hover:bg-indigo-700 w-auto px-4">Add</button>
+                             </div>
+                             <div id="cushion-level-list" class="space-y-2 border rounded-md p-2 bg-gray-50 min-h-[100px]">
+                                <!-- Draggable cushion levels will be rendered here -->
+                             </div>
+                        </div>
+                        <div>
+                            <h3 class="section-title">Model Assignments</h3>
+                            <p class="text-sm text-gray-600 mb-4">Assign a cushion level to each model.</p>
+                            <div id="model-assignment-container" class="border rounded-md p-2 bg-gray-50">
+                                <div id="model-assignment-list" class="space-y-3 max-h-96 overflow-y-auto pr-2">
+                                    <!-- Model assignments will be rendered here -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 4: Unslotted Items -->
+                <div id="tab-unslotted" class="tab-content">
+                     <div class="flex justify-between items-center mb-4">
+                        <h2 class="section-title">Unslotted Items Report</h2>
+                        <button id="downloadUnslottedBtn" class="action-btn bg-gray-600 hover:bg-gray-700 w-auto px-4" disabled>Download as .csv</button>
+                     </div>
+                     <div id="unslotted-list-container" class="mt-2 space-y-3 max-h-96 overflow-y-auto pr-2">
+                         <p class="text-gray-500">Run the slotting process to see unslotted items.</p>
+                     </div>
+                </div>
+
+                <!-- Tab 5: Item Exclusions -->
+                <div id="tab-exclusions" class="tab-content">
+                     <h2 class="section-title">Item Description Exclusions</h2>
+                     <p class="text-sm text-gray-600 mb-4">Add keywords to exclude items from being slotted (e.g., "Apparel", "Socks"). This is case-insensitive.</p>
+                     <div class="flex gap-2 mb-4">
+                        <input type="text" id="exclusion-keyword-input" placeholder="Enter keyword..." class="w-full border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                        <button id="add-exclusion-btn" class="action-btn bg-indigo-600 hover:bg-indigo-700 w-auto px-4">Add</button>
+                     </div>
+                     <div id="exclusion-list" class="space-y-2">
+                        <!-- Exclusion list will be rendered here -->
+                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- START: Metrics & Search -->
+        <div id="overview-controls" class="hidden">
+            <details id="metrics-container" class="bg-white p-6 rounded-xl shadow-md mb-8" open>
+                <summary class="font-semibold text-lg text-gray-800 flex justify-between items-center cursor-pointer">
+                    <span>Operational Metrics</span>
+                    <svg class="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                </summary>
+                <div class="mt-4">
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                        <div><div class="text-2xl font-bold text-gray-800" id="slots-used">0</div><div class="text-sm text-gray-500">Slots Used</div></div>
+                        <div><div class="text-2xl font-bold text-green-600" id="slots-available">0</div><div class="text-sm text-gray-500">Slots Available</div></div>
+                        <div><div class="text-2xl font-bold text-sky-600" id="slots-inbound">0</div><div class="text-sm text-gray-500">Inbound (PO)</div></div>
+                        <div><div class="text-2xl font-bold text-purple-600" id="items-newly-slotted">0</div><div class="text-sm text-gray-500">Newly Slotted Items</div></div>
+                    </div>
+                    <div class="mt-6 pt-4 border-t">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Total Capacity Used</label>
+                        <div class="w-full bg-gray-200 rounded-full h-4"><div id="capacity-bar" class="bg-blue-600 h-4 rounded-full text-center text-white text-xs leading-4"></div></div>
+                    </div>
+                    <div class="mt-6 pt-4 border-t">
+                         <h3 class="text-lg font-semibold text-gray-700 mb-3 text-center">Slot Usage by Brand</h3>
+                         <canvas id="brand-chart"></canvas>
+                    </div>
+                </div>
+            </details>
+
+            <div class="flex justify-between items-center my-4">
+                <h2 class="text-3xl font-bold text-gray-800">Backroom Slotting Overview</h2>
+                <div id="legend" class="flex items-center space-x-4">
+                    <!-- Legend will be dynamically generated here -->
+                </div>
+            </div>
+
+            <div id="search-container" class="mb-4">
+                <input type="text" id="searchInput" placeholder="Search by Brand, Model, Color, or Size..." class="w-full p-3 pl-4 pr-10 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                <span id="searchClearBtn">&times;</span>
+            </div>
+             <!-- START: Dropdown Filters -->
+            <div class="flex items-center gap-4 mb-6">
+                <div id="filter-container" class="grid grid-cols-2 md:grid-cols-4 gap-4 flex-grow">
+                    <select id="brand-filter" class="filter-select border-gray-300 rounded-md shadow-sm"><option value="">All Brands</option></select>
+                    <select id="model-filter" class="filter-select border-gray-300 rounded-md shadow-sm" disabled><option value="">All Models</option></select>
+                    <select id="color-filter" class="filter-select border-gray-300 rounded-md shadow-sm" disabled><option value="">All Colors</option></select>
+                    <select id="size-filter" class="filter-select border-gray-300 rounded-md shadow-sm" disabled><option value="">All Sizes</option></select>
+                </div>
+                <button id="clearFiltersBtn" class="text-sm text-gray-600 hover:text-indigo-600 font-semibold flex items-center gap-1">
+                    <span class="material-symbols-outlined text-base">filter_alt_off</span>
+                    Clear
+                </button>
+            </div>
+            <!-- END: Dropdown Filters -->
+        </div>
+
+        <p id="overviewSubtitle" class="text-gray-600 mt-1 mb-6">Upload inventory files to begin.</p>
+        <div id="visualization-container"></div>
+    </div>
+
+<script src="main.js" defer></script>
+</body>
+</html>
