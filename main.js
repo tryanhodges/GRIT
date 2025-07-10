@@ -11,7 +11,6 @@ const firebaseConfig = {
   measurementId: "G-LJ16FE68W4"
 };
 
-
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
@@ -305,8 +304,7 @@ async function saveSettings() {
 }
 
 function searchAndRender() {
-    // This function is now a placeholder. The actual search logic is triggered by the search button.
-    renderUI(); 
+    renderUI();
 }
 
 function clearFilters() {
@@ -1510,10 +1508,6 @@ function adjustUiForRole(role) {
     document.querySelectorAll('.manager-only').forEach(el => {
         el.classList.toggle('hidden', !isManager);
     });
-
-    // Explicitly enable/disable controls based on role
-    getEl('add-cushion-level-btn').disabled = !isManager;
-    getEl('add-exclusion-btn').disabled = !isManager;
     
     updateUiForSiteSelection();
 }
