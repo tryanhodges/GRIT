@@ -345,7 +345,6 @@ async function executeSearch() {
 
     setLoading(true, `Searching site ${appState.selectedSiteId} for "${searchTerm}"...`);
     try {
-        // *** MODIFIED: Query only the current site's slotting document ***
         const slottingData = await loadDataFromFirestore(`sites/${appState.selectedSiteId}/slotting/current`);
         let searchResults = {};
 
@@ -800,7 +799,6 @@ async function runSlottingProcess() {
         appState.finalSlottedData = result.finalSlottedData;
         appState.unslottedItems = result.unslottedItems;
 
-        // *** FIX: Save the slotting results to Firestore ***
         const slottingResults = {
             data: appState.finalSlottedData,
             unslotted: appState.unslottedItems,
@@ -1776,17 +1774,21 @@ async function getOrCreateUserProfile(user) {
     const userDoc = await userRef.get();
 
     if (!userDoc.exists) {
-        // This is a new user, create their profile
+        // This is a new user, create their profile with a pending status
         const usersCollection = await db.collection('users').limit(1).get();
         const role = usersCollection.empty ? 'manager' : 'salesfloor';
         
         const newUserProfile = {
             email: user.email,
             role: role,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            status: 'pending', // New users start as pending
+            requestTimestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            approvedBy: null,
+            approvalTimestamp: null,
+            homeSiteId: null
         };
         await userRef.set(newUserProfile);
-        showToast(`Account created! You have been assigned the '${role}' role.`, 'success');
+        showToast(`Account created! A manager must approve your account before you can log in.`, 'success');
         return newUserProfile;
     } else {
         // Existing user
@@ -1818,7 +1820,7 @@ async function handleSignUp() {
     setLoading(true, "Creating account...");
     try {
         await auth.createUserWithEmailAndPassword(email, password);
-        // onAuthStateChanged will handle creating the user profile
+        // onAuthStateChanged will handle creating the user profile and signing them out
     } catch (error) {
         showAuthError(error.message);
     } finally {
@@ -1863,54 +1865,104 @@ function adjustUiForRole(role) {
 }
 
 async function renderUserManagementModal() {
-    const container = getEl('user-list-container');
-    container.innerHTML = '<div class="spinner"></div>'; // Show loader
-    
+    const pendingContainer = getEl('pending-approvals-container');
+    const activeContainer = getEl('user-list-container');
+    pendingContainer.innerHTML = '<div class="spinner"></div>';
+    activeContainer.innerHTML = '';
+
     try {
         const usersSnapshot = await db.collection('users').get();
-        container.innerHTML = '';
-        if (usersSnapshot.empty) {
-            container.innerHTML = '<p class="text-gray-500">No other users found.</p>';
-            return;
-        }
+        pendingContainer.innerHTML = '';
+        
+        const pendingUsers = [];
+        const activeUsers = [];
 
         usersSnapshot.docs.forEach(doc => {
-            const user = doc.data();
-            const userId = doc.id;
-            
-            const userEl = document.createElement('div');
-            userEl.className = 'flex justify-between items-center p-3 rounded-lg bg-gray-50 border';
-            
-            const emailSpan = `<span class="font-semibold">${user.email}</span>`;
-            const selfLabel = userId === appState.currentUser.uid ? '<span class="text-xs font-bold text-indigo-600 ml-2">(You)</span>' : '';
-            
-            const roleSelect = `
-                <select data-uid="${userId}" class="role-select border-gray-300 rounded-md shadow-sm" ${userId === appState.currentUser.uid ? 'disabled' : ''}>
-                    <option value="salesfloor" ${user.role === 'salesfloor' ? 'selected' : ''}>Salesfloor</option>
-                    <option value="manager" ${user.role === 'manager' ? 'selected' : ''}>Manager</option>
-                </select>
-            `;
-            
-            const deleteBtn = `<button data-uid="${userId}" data-email="${user.email}" class="delete-user-btn text-red-500 hover:text-red-700 disabled:opacity-50" ${userId === appState.currentUser.uid ? 'disabled' : ''}>&times;</button>`;
-            
-            userEl.innerHTML = `
-                <div>${emailSpan} ${selfLabel}</div>
-                <div class="flex items-center gap-4">${roleSelect} ${deleteBtn}</div>
-            `;
-            container.appendChild(userEl);
+            const user = { id: doc.id, ...doc.data() };
+            if (user.status === 'pending') {
+                pendingUsers.push(user);
+            } else if (user.status !== 'denied') { // Show only active users
+                activeUsers.push(user);
+            }
         });
 
+        // Render Pending Users
+        if (pendingUsers.length === 0) {
+            pendingContainer.innerHTML = '<p class="text-gray-500">No new users are awaiting approval.</p>';
+        } else {
+            pendingUsers.forEach(user => {
+                const userEl = document.createElement('div');
+                userEl.className = 'flex justify-between items-center p-3 rounded-lg bg-yellow-50 border border-yellow-200';
+                const requestDate = user.requestTimestamp?.toDate().toLocaleDateString() || 'N/A';
+                userEl.innerHTML = `
+                    <div>
+                        <p class="font-semibold">${user.email}</p>
+                        <p class="text-xs text-gray-600">Requested: ${requestDate}</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button data-uid="${user.id}" class="approve-user-btn btn btn-primary bg-green-600 hover:bg-green-700 text-xs py-1 px-2">Approve</button>
+                        <button data-uid="${user.id}" class="deny-user-btn btn btn-secondary bg-red-600 hover:bg-red-700 text-white text-xs py-1 px-2">Deny</button>
+                    </div>
+                `;
+                pendingContainer.appendChild(userEl);
+            });
+        }
+
+        // Render Active Users
+        if (activeUsers.length === 0) {
+            activeContainer.innerHTML = '<p class="text-gray-500">No other active users found.</p>';
+        } else {
+            activeUsers.forEach(user => {
+                const userEl = document.createElement('div');
+                userEl.className = 'flex justify-between items-center p-3 rounded-lg bg-gray-50 border';
+                
+                const emailSpan = `<span class="font-semibold">${user.email}</span>`;
+                const selfLabel = user.id === appState.currentUser.uid ? '<span class="text-xs font-bold text-indigo-600 ml-2">(You)</span>' : '';
+                
+                const roleSelect = `
+                    <select data-uid="${user.id}" class="role-select border-gray-300 rounded-md shadow-sm" ${user.id === appState.currentUser.uid ? 'disabled' : ''}>
+                        <option value="salesfloor" ${user.role === 'salesfloor' ? 'selected' : ''}>Salesfloor</option>
+                        <option value="manager" ${user.role === 'manager' ? 'selected' : ''}>Manager</option>
+                    </select>
+                `;
+                
+                const deleteBtn = `<button data-uid="${user.id}" data-email="${user.email}" class="delete-user-btn text-red-500 hover:text-red-700 disabled:opacity-50" ${user.id === appState.currentUser.uid ? 'disabled' : ''}>&times;</button>`;
+                
+                userEl.innerHTML = `
+                    <div>${emailSpan} ${selfLabel}</div>
+                    <div class="flex items-center gap-4">${roleSelect} ${deleteBtn}</div>
+                `;
+                activeContainer.appendChild(userEl);
+            });
+        }
+
         // Add event listeners after rendering
-        document.querySelectorAll('.role-select').forEach(select => {
-            select.addEventListener('change', (e) => updateUserRole(e.target.dataset.uid, e.target.value));
-        });
-        document.querySelectorAll('.delete-user-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => deleteUser(e.target.dataset.uid, e.target.dataset.email));
-        });
+        document.querySelectorAll('.approve-user-btn').forEach(btn => btn.addEventListener('click', (e) => handleApprovalAction(e.target.dataset.uid, 'approved')));
+        document.querySelectorAll('.deny-user-btn').forEach(btn => btn.addEventListener('click', (e) => handleApprovalAction(e.target.dataset.uid, 'denied')));
+        document.querySelectorAll('.role-select').forEach(select => select.addEventListener('change', (e) => updateUserRole(e.target.dataset.uid, e.target.value)));
+        document.querySelectorAll('.delete-user-btn').forEach(btn => btn.addEventListener('click', (e) => deleteUser(e.target.dataset.uid, e.target.dataset.email)));
 
     } catch (error) {
         console.error("Error fetching users:", error);
-        container.innerHTML = '<p class="text-red-500">Could not load user list.</p>';
+        pendingContainer.innerHTML = '<p class="text-red-500">Could not load user list.</p>';
+    }
+}
+
+async function handleApprovalAction(userId, action) {
+    setLoading(true, `Updating user status...`);
+    try {
+        const updateData = {
+            status: action,
+            approvedBy: appState.currentUser.email,
+            approvalTimestamp: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        await saveDataToFirestore(`users/${userId}`, updateData);
+        showToast(`User has been ${action}.`, 'success');
+        renderUserManagementModal(); // Refresh the list
+    } catch (error) {
+        showToast("Failed to update user status.", "error");
+    } finally {
+        setLoading(false);
     }
 }
 
@@ -2094,6 +2146,20 @@ document.addEventListener('DOMContentLoaded', function () {
             setLoading(true, 'Verifying user...');
             const userProfile = await getOrCreateUserProfile(user);
             
+            // Check user status before proceeding
+            if (userProfile.status === 'pending') {
+                showToast('Your account is awaiting approval from a manager.', 'info');
+                auth.signOut();
+                setLoading(false);
+                return;
+            }
+            if (userProfile.status === 'denied') {
+                showToast('Your account request has been denied.', 'error');
+                auth.signOut();
+                setLoading(false);
+                return;
+            }
+
             appState.currentUser.uid = user.uid;
             appState.currentUser.email = user.email;
             appState.currentUser.role = userProfile.role;
