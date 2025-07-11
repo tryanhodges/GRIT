@@ -539,7 +539,7 @@ async function runSlottingProcess() {
         const token = await user.getIdToken();
 
         // *** MODIFIED: Call Netlify Function using fetch ***
-        const response = await fetch('/.netlify/functions/run-slotting', {
+        const response = await fetch('/netlify/functions/run-slotting', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
