@@ -206,10 +206,7 @@ async function initializeFromStorage() {
     appState.unslottedItems = [];
     appState.exclusionKeywords = [];
     
-    const settingsPath = `sites/${appState.selectedSiteId}/configs/mainSettings`;
-    const storedSettings = await loadDataFromFirestore(settingsPath);
-
-    // Define default colors to fall back on
+    // Define default values
     const defaultColors = {
         'M': { name: 'Men', onHand: '#5468C1', po: '#a9b3e0' },
         'W': { name: 'Women', onHand: '#f846f0', po: '#fbc2f8' },
@@ -217,6 +214,22 @@ async function initializeFromStorage() {
         'Y': { name: 'Kids', onHand: '#64d669', po: '#b1ebc4' }
     };
     const defaultCushionColor = '#6b7280';
+
+    // *** FIX: Start by applying default settings ***
+    getEl('rackCount').value = 26;
+    getEl('sectionsPerRack').value = 8;
+    getEl('stacksPerSection').value = 5;
+    getEl('slotsPerStack').value = 5;
+    getEl('excludeRacks').value = '';
+    getEl('includeKids').checked = false;
+    getEl('userInitials').value = '';
+    appState.userInitials = '';
+    appState.colorMap = defaultColors;
+    appState.cushionIndicatorColor = defaultCushionColor;
+
+    // *** FIX: Now, attempt to load stored settings and override the defaults ***
+    const settingsPath = `sites/${appState.selectedSiteId}/configs/mainSettings`;
+    const storedSettings = await loadDataFromFirestore(settingsPath);
 
     if (storedSettings) {
         getEl('rackCount').value = storedSettings.rackCount || 26;
@@ -230,18 +243,6 @@ async function initializeFromStorage() {
         
         appState.colorMap = storedSettings.colorMap || defaultColors;
         appState.cushionIndicatorColor = storedSettings.cushionIndicatorColor || defaultCushionColor;
-    } else {
-        // If no settings are stored for this site, reset ALL settings to defaults
-        getEl('rackCount').value = 26;
-        getEl('sectionsPerRack').value = 8;
-        getEl('stacksPerSection').value = 5;
-        getEl('slotsPerStack').value = 5;
-        getEl('excludeRacks').value = '';
-        getEl('includeKids').checked = false;
-        getEl('userInitials').value = '';
-        appState.userInitials = '';
-        appState.colorMap = defaultColors;
-        appState.cushionIndicatorColor = defaultCushionColor;
     }
 
     // Now that appState is correct, update the UI inputs from the state
