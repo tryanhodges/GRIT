@@ -96,14 +96,17 @@ exports.handler = async (event, context) => {
         }
 
         try {
+            console.log("Function invoked. Verifying user token...");
             const decodedToken = await admin.auth().verifyIdToken(token);
             const uid = decodedToken.uid;
             const userDoc = await db.collection('users').doc(uid).get();
 
             // Check if the user has the 'manager' role.
             if (!userDoc.exists || userDoc.data().role !== 'manager') {
+                console.error(`Permission denied for user: ${uid}`);
                 return callback(403, { error: 'Permission Denied: Only managers can run this process.' });
             }
+            console.log(`User ${uid} authenticated as manager.`);
 
             // The body of the request from the frontend comes as a string.
             const { inventoryData, poData, previousSlottingData, settings, cushionData, exclusionKeywords } = JSON.parse(event.body);
@@ -115,85 +118,106 @@ exports.handler = async (event, context) => {
             // 1. Process Previous Slotting Data
             let existingBackroom = {};
             if (previousSlottingData) {
-                const lines = previousSlottingData.split('\n').map(l => l.split(','));
-                const header = lines[0].map(h => h.replace(/"/g, '').toLowerCase());
-                const locIndex = header.indexOf('locationid');
-                const itemStringIndex = header.indexOf('originalitemstring');
-                const brandIndex = header.indexOf('brand');
-                const typeIndex = header.indexOf('type');
+                try {
+                    console.log("Processing previous slotting data...");
+                    const lines = previousSlottingData.split('\n').filter(l => l.trim() !== '');
+                    const header = lines[0].map(h => h.replace(/"/g, '').toLowerCase());
+                    const locIndex = header.indexOf('locationid');
+                    const itemStringIndex = header.indexOf('originalitemstring');
+                    const brandIndex = header.indexOf('brand');
+                    const typeIndex = header.indexOf('type');
 
-                for (let i = 1; i < lines.length; i++) {
-                    const cols = lines[i].map(c => c.replace(/"/g, ''));
-                    if (cols.length < locIndex + 1) continue;
-                    const locationId = cols[locIndex];
-                    if (!locationId) continue;
-                    const originalString = cols[itemStringIndex];
-                    const { Model, Color, Size, Sex } = parseItemString(originalString);
-                    existingBackroom[locationId] = {
-                        UniqueID: `${cols[brandIndex]}-${Model}-${Color}-${Size}-${i}`,
-                        Brand: cols[brandIndex], Model, Color, Size, Sex,
-                        Type: cols[typeIndex], OriginalItemString: originalString
-                    };
+                    for (let i = 1; i < lines.length; i++) {
+                        const cols = lines[i].map(c => c.replace(/"/g, ''));
+                        if (cols.length < locIndex + 1) continue;
+                        const locationId = cols[locIndex];
+                        if (!locationId) continue;
+                        const originalString = cols[itemStringIndex];
+                        const { Model, Color, Size, Sex } = parseItemString(originalString);
+                        existingBackroom[locationId] = {
+                            UniqueID: `${cols[brandIndex]}-${Model}-${Color}-${Size}-${i}`,
+                            Brand: cols[brandIndex], Model, Color, Size, Sex,
+                            Type: cols[typeIndex], OriginalItemString: originalString
+                        };
+                    }
+                    console.log(`Processed ${Object.keys(existingBackroom).length} items from previous slotting.`);
+                } catch (e) {
+                    console.error("Error processing previous slotting file:", e.message);
+                    // Decide if you want to stop or continue. For now, we'll continue.
                 }
             }
 
             // 2. Process Inventory Files
             let allInventoryItems = [];
             inventoryData.forEach(invFile => {
-                const brand = invFile.brand;
-                const lines = invFile.content.split('\n').map(l => l.split(','));
-                const header = lines[0].map(h => h.replace(/"/g, '').toLowerCase());
-                const itemIndex = header.indexOf('item');
-                const remainingIndex = header.indexOf('remaining');
+                try {
+                    console.log(`Processing inventory file: ${invFile.name}`);
+                    const brand = invFile.brand;
+                    const lines = invFile.content.split('\n').filter(l => l.trim() !== '');
+                    const header = lines[0].map(h => h.replace(/"/g, '').toLowerCase());
+                    const itemIndex = header.indexOf('item');
+                    const remainingIndex = header.indexOf('remaining');
 
-                for (let i = 1; i < lines.length; i++) {
-                    const cols = lines[i].map(c => c.replace(/"/g, ''));
-                    if (cols.length < Math.max(itemIndex, remainingIndex) + 1) continue;
-                    const itemString = cols[itemIndex];
-                    if (exclusionKeywords.some(kw => itemString.toLowerCase().includes(kw.toLowerCase()))) continue;
-                    const remaining = parseInt(cols[remainingIndex], 10);
-                    if (itemString && !isNaN(remaining) && remaining > 0) {
-                        const { Model, Color, Size, Sex } = parseItemString(itemString);
-                        if (!settings.includeKids && (Sex === 'Y' || Sex === 'K')) continue;
-                        for (let j = 0; j < remaining; j++) {
-                            allInventoryItems.push({
-                                Brand: brand, Model, Color, Size, Sex, Type: 'Inventory',
-                                UniqueID: `${brand}-${Model}-${Color}-${Size}-${j + 1}`, OriginalItemString: itemString
-                            });
+                    for (let i = 1; i < lines.length; i++) {
+                        const cols = lines[i].map(c => c.replace(/"/g, ''));
+                        if (cols.length < Math.max(itemIndex, remainingIndex) + 1) continue;
+                        const itemString = cols[itemIndex];
+                        if (exclusionKeywords.some(kw => itemString.toLowerCase().includes(kw.toLowerCase()))) continue;
+                        const remaining = parseInt(cols[remainingIndex], 10);
+                        if (itemString && !isNaN(remaining) && remaining > 0) {
+                            const { Model, Color, Size, Sex } = parseItemString(itemString);
+                            if (!settings.includeKids && (Sex === 'Y' || Sex === 'K')) continue;
+                            for (let j = 0; j < remaining; j++) {
+                                allInventoryItems.push({
+                                    Brand: brand, Model, Color, Size, Sex, Type: 'Inventory',
+                                    UniqueID: `${brand}-${Model}-${Color}-${Size}-${j + 1}`, OriginalItemString: itemString
+                                });
+                            }
                         }
                     }
+                } catch (e) {
+                    console.error(`Error processing inventory file ${invFile.name}:`, e.message);
                 }
             });
+            console.log(`Processed ${allInventoryItems.length} total inventory items.`);
+
 
             // 3. Process PO Files
             let allPoItems = [];
             poData.forEach(poFile => {
-                const brand = poFile.brand;
-                const lines = poFile.content.split('\n').map(l => l.split(','));
-                const header = lines[0].map(h => h.replace(/"/g, '').toLowerCase());
-                const itemIndex = header.indexOf('item');
-                const qtyIndex = header.indexOf('order qty');
+                try {
+                    console.log(`Processing PO file: ${poFile.name}`);
+                    const brand = poFile.brand;
+                    const lines = poFile.content.split('\n').filter(l => l.trim() !== '');
+                    const header = lines[0].map(h => h.replace(/"/g, '').toLowerCase());
+                    const itemIndex = header.indexOf('item');
+                    const qtyIndex = header.indexOf('order qty');
 
-                for (let i = 1; i < lines.length; i++) {
-                    const cols = lines[i].map(c => c.replace(/"/g, ''));
-                    if (cols.length < Math.max(itemIndex, qtyIndex) + 1) continue;
-                    const itemString = cols[itemIndex];
-                    if (exclusionKeywords.some(kw => itemString.toLowerCase().includes(kw.toLowerCase()))) continue;
-                    const orderQty = parseInt(cols[qtyIndex], 10);
-                    if (itemString && !isNaN(orderQty) && orderQty > 0) {
-                        const { Model, Color, Size, Sex } = parseItemString(itemString);
-                        if (!settings.includeKids && (Sex === 'Y' || Sex === 'K')) continue;
-                        for (let j = 0; j < orderQty; j++) {
-                            allPoItems.push({
-                                Brand: brand, Model, Color, Size, Sex, Type: 'PO',
-                                UniqueID: `${poFile.name}-${brand}-${Model}-${Color}-${Size}-PO-${j + 1}`, OriginalItemString: itemString
-                            });
+                    for (let i = 1; i < lines.length; i++) {
+                        const cols = lines[i].map(c => c.replace(/"/g, ''));
+                        if (cols.length < Math.max(itemIndex, qtyIndex) + 1) continue;
+                        const itemString = cols[itemIndex];
+                        if (exclusionKeywords.some(kw => itemString.toLowerCase().includes(kw.toLowerCase()))) continue;
+                        const orderQty = parseInt(cols[qtyIndex], 10);
+                        if (itemString && !isNaN(orderQty) && orderQty > 0) {
+                            const { Model, Color, Size, Sex } = parseItemString(itemString);
+                            if (!settings.includeKids && (Sex === 'Y' || Sex === 'K')) continue;
+                            for (let j = 0; j < orderQty; j++) {
+                                allPoItems.push({
+                                    Brand: brand, Model, Color, Size, Sex, Type: 'PO',
+                                    UniqueID: `${poFile.name}-${brand}-${Model}-${Color}-${Size}-PO-${j + 1}`, OriginalItemString: itemString
+                                });
+                            }
                         }
                     }
+                } catch(e) {
+                    console.error(`Error processing PO file ${poFile.name}:`, e.message);
                 }
             });
+            console.log(`Processed ${allPoItems.length} total PO items.`);
             
             // 4. Reconcile and Sort
+            console.log("Reconciling and sorting items...");
             const reconciledBackroom = {};
             const alreadyPlacedUniqueIDs = new Set();
             const currentInventoryMap = new Map(allInventoryItems.map(item => [item.UniqueID, item]));
@@ -233,8 +257,10 @@ exports.handler = async (event, context) => {
                 if (!isNaN(sizeA) && !isNaN(sizeB)) return sizeB - sizeA;
                 return a.Size.localeCompare(b.Size);
             });
+            console.log(`Total items to slot: ${itemsToSlot.length}`);
 
             // 5. Generate Slotting
+            console.log("Generating slotting assignments...");
             const { rackCount, sectionsPerRack, stacksPerSection, slotsPerStack, excludeRacks } = settings;
             const excludedRacksArr = excludeRacks.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
             const backroom = { ...reconciledBackroom };
@@ -322,6 +348,7 @@ exports.handler = async (event, context) => {
             }
 
             const unslottedItems = unslottedGroups.flatMap(g => g.originalItems);
+            console.log(`Slotting complete. ${unslottedItems.length} items unslotted.`);
             
             // Return the results to the frontend.
             callback(200, {
@@ -333,7 +360,7 @@ exports.handler = async (event, context) => {
             });
 
         } catch (error) {
-            console.error('Error in run-slotting function:', error);
+            console.error('Fatal error in run-slotting function:', error);
             callback(500, { error: { message: error.message || 'An internal server error occurred.' } });
         }
       })();
