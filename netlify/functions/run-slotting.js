@@ -9,9 +9,10 @@ const corsHandler = cors({ origin: true });
 // --- START: Firebase Admin SDK Initialization ---
 // This check prevents re-initialization on "hot-reloads".
 if (!admin.apps.length) {
-  // This is the recommended way to initialize the Admin SDK.
-  // It uses the GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable
-  // that you set in your Netlify build settings.
+  // Check if the environment variable exists before parsing
+  if (!process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+    throw new Error("FATAL_ERROR: GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable not set.");
+  }
   const serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
 
   admin.initializeApp({
