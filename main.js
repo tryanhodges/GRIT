@@ -229,7 +229,15 @@ async function initializeFromStorage() {
         appState.colorMap = storedSettings.colorMap || defaultColors;
         appState.cushionIndicatorColor = storedSettings.cushionIndicatorColor || defaultCushionColor;
     } else {
-        // If no settings are stored for this site, reset colors to defaults
+        // If no settings are stored for this site, reset ALL settings to defaults
+        getEl('rackCount').value = 26;
+        getEl('sectionsPerRack').value = 8;
+        getEl('stacksPerSection').value = 5;
+        getEl('slotsPerStack').value = 5;
+        getEl('excludeRacks').value = '';
+        getEl('includeKids').checked = false;
+        getEl('userInitials').value = '';
+        appState.userInitials = '';
         appState.colorMap = defaultColors;
         appState.cushionIndicatorColor = defaultCushionColor;
     }
@@ -780,10 +788,20 @@ async function runSlottingProcess() {
             exclusionKeywords: appState.exclusionKeywords,
         });
 
-        setLoading(true, 'Rendering results...');
+        setLoading(true, 'Saving and rendering results...');
         
         appState.finalSlottedData = result.finalSlottedData;
         appState.unslottedItems = result.unslottedItems;
+
+        // *** FIX: Save the slotting results to Firestore ***
+        const slottingResults = {
+            data: appState.finalSlottedData,
+            unslotted: appState.unslottedItems,
+            lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
+            updatedBy: appState.currentUser.email
+        };
+        await saveDataToFirestore(`sites/${appState.selectedSiteId}/slotting`, 'current', slottingResults);
+
 
         // The function doesn't need to save POs, the client does after parsing
         await parsePOFiles(poFiles); 
