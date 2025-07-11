@@ -2,6 +2,8 @@
 # "." means the root of your repository.
 [build]
   publish = "."
-  
+
+[functions]
+  directory = "netlify/functions/"
   # This gives your slotting function more time to run, preventing timeouts.
   timeout = 26
