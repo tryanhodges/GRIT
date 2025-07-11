@@ -345,6 +345,7 @@ async function executeSearch() {
 
     setLoading(true, `Searching site ${appState.selectedSiteId} for "${searchTerm}"...`);
     try {
+        // *** MODIFIED: Query only the current site's slotting document ***
         const slottingData = await loadDataFromFirestore(`sites/${appState.selectedSiteId}/slotting/current`);
         let searchResults = {};
 
