@@ -15,7 +15,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const auth = firebase.auth();
-const functions = firebase.functions();
+// NOTE: firebase.functions() is no longer used for the slotting process.
 // --- END: Firebase Configuration ---
 
 
@@ -520,26 +520,40 @@ async function runSlottingProcess() {
         }
         const token = await user.getIdToken();
 
-        const runSlotting = functions.httpsCallable('run-slotting');
-        const result = await runSlotting({
-            siteId: appState.selectedSiteId,
-            inventoryData,
-            poData,
-            previousSlottingData,
-            settings: {
-                rackCount: getEl('rackCount').value,
-                sectionsPerRack: getEl('sectionsPerRack').value,
-                stacksPerSection: getEl('stacksPerSection').value,
-                slotsPerStack: getEl('slotsPerStack').value,
-                excludeRacks: getEl('excludeRacks').value,
-                includeKids: getEl('includeKids').checked,
+        // *** MODIFIED: Call Netlify Function using fetch ***
+        const response = await fetch('/.netlify/functions/run-slotting', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
             },
-            cushionData: {
-                levels: appState.cushionLevels,
-                assignments: appState.modelCushionAssignments,
-            },
-            exclusionKeywords: appState.exclusionKeywords,
+            body: JSON.stringify({
+                inventoryData,
+                poData,
+                previousSlottingData,
+                settings: {
+                    rackCount: getEl('rackCount').value,
+                    sectionsPerRack: getEl('sectionsPerRack').value,
+                    stacksPerSection: getEl('stacksPerSection').value,
+                    slotsPerStack: getEl('slotsPerStack').value,
+                    excludeRacks: getEl('excludeRacks').value,
+                    includeKids: getEl('includeKids').checked,
+                },
+                cushionData: {
+                    levels: appState.cushionLevels,
+                    assignments: appState.modelCushionAssignments,
+                },
+                exclusionKeywords: appState.exclusionKeywords,
+            })
         });
+
+        if (!response.ok) {
+            const errorBody = await response.json();
+            throw new Error(errorBody.error?.message || `Request failed with status ${response.status}`);
+        }
+
+        const result = await response.json();
+        // *** END MODIFICATION ***
 
         setLoading(true, 'Rendering results...');
         
@@ -573,6 +587,7 @@ async function runSlottingProcess() {
 
 // --- Parsing Functions ---
 function toTitleCase(str) {
+    if (!str) return '';
     return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }
 
@@ -638,6 +653,20 @@ async function parsePOFiles(fileList) {
         }
     }
     if(newPOsLoaded) renderPODetails();
+}
+
+function robustCSVParse(csvText) {
+  // Simple parser: splits by newline, then by comma.
+  // For a production app, a more robust library might be needed to handle edge cases.
+  return csvText.trim().split('\n').map(line => line.split(',').map(field => field.trim().replace(/"/g, '')));
+}
+
+function createHeaderMap(headerRow) {
+  const map = new Map();
+  headerRow.forEach((header, index) => {
+    map.set(header.toLowerCase().trim().replace(/"/g, ''), index);
+  });
+  return map;
 }
 
 // --- Rendering Functions ---

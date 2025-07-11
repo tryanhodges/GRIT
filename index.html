@@ -20,6 +20,7 @@
     </div>
     <div id="toast-container"></div>
     
+    <!-- START: Confirmation Modal -->
     <div id="confirmation-modal" class="modal-overlay">
         <div class="modal-content max-w-md">
             <h2 id="confirmation-title" class="text-xl font-bold text-gray-800 mb-4">Are you sure?</h2>
@@ -30,6 +31,9 @@
             </div>
         </div>
     </div>
+    <!-- END: Confirmation Modal -->
+
+    <!-- START: Auth Container -->
     <div id="auth-container" class="max-w-md mx-auto mt-10">
         <div class="bg-white p-8 rounded-xl shadow-md">
             <div class="flex justify-center mb-6">
@@ -56,7 +60,11 @@
             </div>
         </div>
     </div>
+    <!-- END: Auth Container -->
+    
+    <!-- START: Main App Container (hidden by default) -->
     <div id="app-container" class="hidden">
+        <!-- START: Site Management Modal -->
         <div id="site-management-modal" class="modal-overlay">
             <div class="modal-content">
                 <div class="flex justify-between items-center mb-6">
@@ -67,7 +75,8 @@
                     <div>
                         <h3 class="section-title">Existing Sites</h3>
                         <div id="site-list-container" class="space-y-2 max-h-64 overflow-y-auto">
-                            </div>
+                            <!-- Site list rendered here -->
+                        </div>
                     </div>
                     <div>
                         <h3 class="section-title">Create New Site</h3>
@@ -80,6 +89,9 @@
                 </div>
             </div>
         </div>
+        <!-- END: Site Management Modal -->
+
+        <!-- START: Settings Modal -->
         <div id="settings-modal" class="modal-overlay">
             <div class="modal-content">
                 <div class="flex justify-between items-center mb-6">
@@ -165,6 +177,9 @@
                 </div>
             </div>
         </div>
+        <!-- END: Settings Modal -->
+
+        <!-- START: User Management Modal -->
         <div id="user-management-modal" class="modal-overlay">
             <div class="modal-content">
                 <div class="flex justify-between items-center mb-6">
@@ -172,12 +187,18 @@
                     <button id="close-user-management-btn" class="text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
                 </div>
                 <div id="user-list-container" class="space-y-3">
-                    </div>
+                    <!-- User list will be rendered here -->
+                </div>
             </div>
         </div>
+        <!-- END: User Management Modal -->
+
         <div class="max-w-7xl mx-auto">
+            <!-- START: Control Panel -->
             <div class="bg-white p-6 rounded-xl shadow-md mb-8">
+                <!-- START: Header with Logos -->
                 <header class="flex justify-between items-start mb-6">
+                    <!-- Left Column -->
                     <div class="flex items-start gap-4">
                         <div class="flex-shrink-0" style="width: 78px;">
                            <svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="78px" height="63px" version="1.0" shape-rendering="geometricPrecision" text-rendering="geometricPrecision" image-rendering="optimizeQuality" fill-rule="evenodd" clip-rule="evenodd"
@@ -212,6 +233,7 @@
                             </div>
                         </div>
                     </div>
+                    <!-- Right Column -->
                     <div class="flex flex-col items-end gap-2">
                         <div class="flex-shrink-0" style="width: 100px;">
                             <svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" version="1.0" shape-rendering="geometricPrecision" text-rendering="geometricPrecision" image-rendering="optimizeQuality" fill-rule="evenodd" clip-rule="evenodd" viewBox="0 0 1000 600">
@@ -244,6 +266,8 @@
                         </div>
                     </div>
                 </header>
+                <!-- END: Header with Logos -->
+
                 <div class="flex items-center border-b border-gray-200">
                     <button class="tab-button active" data-tab="setup">Setup & Slot</button>
                     <button class="tab-button" data-tab="receiving">PO Receiving</button>
@@ -256,6 +280,7 @@
                 </div>
 
                 <div class="pt-6">
+                    <!-- Tab 1: Setup & Slot -->
                     <div id="tab-setup" class="tab-content active">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
                             <div>
@@ -300,6 +325,7 @@
                         </div>
                     </div>
 
+                    <!-- Tab 2: PO Receiving -->
                     <div id="tab-receiving" class="tab-content">
                          <h2 class="section-title">Inbound PO Detail</h2>
                          <div id="po-summary" class="mb-4 text-sm text-gray-700 font-semibold"></div>
@@ -308,6 +334,7 @@
                          </div>
                     </div>
 
+                    <!-- Tab 3: Cushion Sorting -->
                     <div id="tab-cushion" class="tab-content manager-only hidden">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
                             <div>
@@ -318,19 +345,22 @@
                                     <button id="add-cushion-level-btn" class="action-btn bg-indigo-600 hover:bg-indigo-700 w-auto px-4">Add</button>
                                  </div>
                                  <div id="cushion-level-list" class="space-y-2 border rounded-md p-2 bg-gray-50 min-h-[100px]">
-                                    </div>
+                                    <!-- Draggable cushion levels will be rendered here -->
+                                 </div>
                             </div>
                             <div>
                                 <h3 class="section-title">Model Assignments</h3>
                                 <p class="text-sm text-gray-600 mb-4">Assign a cushion level to each model.</p>
                                 <div id="model-assignment-container" class="border rounded-md p-2 bg-gray-50">
                                     <div id="model-assignment-list" class="space-y-3 max-h-96 overflow-y-auto pr-2">
-                                        </div>
+                                        <!-- Model assignments will be rendered here -->
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                     
+                    <!-- Tab 4: Unslotted Items -->
                     <div id="tab-unslotted" class="tab-content">
                          <div class="flex justify-between items-center mb-4">
                             <h2 class="section-title">Unslotted Items Report</h2>
@@ -341,6 +371,7 @@
                          </div>
                     </div>
 
+                    <!-- Tab 5: Item Exclusions -->
                     <div id="tab-exclusions" class="tab-content manager-only hidden">
                          <h2 class="section-title">Item Description Exclusions</h2>
                          <p class="text-sm text-gray-600 mb-4">Add keywords to exclude items from being slotted (e.g., "Apparel", "Socks"). This is case-insensitive.</p>
@@ -349,11 +380,13 @@
                             <button id="add-exclusion-btn" class="action-btn bg-indigo-600 hover:bg-indigo-700 w-auto px-4">Add</button>
                          </div>
                          <div id="exclusion-list" class="space-y-2">
-                            </div>
+                            <!-- Exclusion list will be rendered here -->
+                         </div>
                     </div>
                 </div>
             </div>
 
+            <!-- START: Metrics & Search -->
             <div id="overview-controls" class="hidden">
                 <details id="metrics-container" class="bg-white p-6 rounded-xl shadow-md mb-8" open>
                     <summary class="font-semibold text-lg text-gray-800 flex justify-between items-center cursor-pointer">
@@ -381,14 +414,16 @@
                 <div class="flex justify-between items-center my-4">
                     <h2 class="text-3xl font-bold text-gray-800">Backroom Slotting Overview</h2>
                     <div id="legend" class="flex items-center space-x-4">
-                        </div>
+                        <!-- Legend will be dynamically generated here -->
+                    </div>
                 </div>
 
                 <div class="flex items-center gap-2 mb-4">
                     <input type="text" id="searchInput" placeholder="Search all sites by Brand, Model, Color, or Size..." class="w-full p-3 pl-4 pr-10 border border-gray-300 rounded-lg shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
                     <button id="search-btn" class="btn btn-primary flex-shrink-0">Search</button>
                 </div>
-                 <div class="flex items-center gap-4 mb-6">
+                 <!-- START: Dropdown Filters -->
+                <div class="flex items-center gap-4 mb-6">
                     <div id="filter-container" class="grid grid-cols-2 md:grid-cols-4 gap-4 flex-grow">
                         <select id="brand-filter" class="filter-select border-gray-300 rounded-md shadow-sm"><option value="">All Brands</option></select>
                         <select id="model-filter" class="filter-select border-gray-300 rounded-md shadow-sm" disabled><option value="">All Models</option></select>
@@ -400,16 +435,20 @@
                         Clear
                     </button>
                 </div>
-                </div>
+                <!-- END: Dropdown Filters -->
+            </div>
 
             <p id="overviewSubtitle" class="text-gray-600 mt-1 mb-6">Select a site to begin.</p>
             <div id="visualization-container"></div>
         </div>
     </div>
+    <!-- END: Main App Container -->
+    
+    <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-functions-compat.js"></script>
+    <!-- REMOVED: firebase-functions-compat.js is no longer needed -->
     
     <script src="main.js" defer></script>
 </body>
