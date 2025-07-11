@@ -1770,33 +1770,6 @@ function clearAuthError() {
     getEl('auth-error').classList.add('hidden');
 }
 
-async function getOrCreateUserProfile(user) {
-    const userRef = db.collection('users').doc(user.uid);
-    const userDoc = await userRef.get();
-
-    if (!userDoc.exists) {
-        // This is a new user, create their profile with a pending status
-        const usersCollection = await db.collection('users').limit(1).get();
-        const role = usersCollection.empty ? 'manager' : 'salesfloor';
-        
-        const newUserProfile = {
-            email: user.email,
-            role: role,
-            status: 'pending', // New users start as pending
-            requestTimestamp: firebase.firestore.FieldValue.serverTimestamp(),
-            approvedBy: null,
-            approvalTimestamp: null,
-            homeSiteId: null
-        };
-        await userRef.set(newUserProfile);
-        showToast(`Account created! A manager must approve your account before you can log in.`, 'success');
-        return newUserProfile;
-    } else {
-        // Existing user
-        return userDoc.data();
-    }
-}
-
 async function handleGoogleSignIn() {
     clearAuthError();
     const provider = new firebase.auth.GoogleAuthProvider();
@@ -1821,7 +1794,8 @@ async function handleSignUp() {
     setLoading(true, "Creating account...");
     try {
         await auth.createUserWithEmailAndPassword(email, password);
-        // onAuthStateChanged will handle creating the user profile and signing them out
+        // onAuthStateChanged will handle creating the user profile and then signing them out
+        // because their status will be 'pending'.
     } catch (error) {
         showAuthError(error.message);
     } finally {
@@ -2143,24 +2117,46 @@ document.addEventListener('DOMContentLoaded', function () {
 
     auth.onAuthStateChanged(async (user) => {
         if (user) {
-            // User is signed in.
+            // User is signed in. Let's verify their status.
             setLoading(true, 'Verifying user...');
-            const userProfile = await getOrCreateUserProfile(user);
+            const userRef = db.collection('users').doc(user.uid);
+            let userDoc = await userRef.get();
+            let userProfile;
+
+            if (!userDoc.exists) {
+                // This is a new user (likely from Google Sign-In or first-time email signup), create their profile.
+                const usersCollection = await db.collection('users').limit(1).get();
+                // The first user ever becomes a manager, all others are salesfloor by default.
+                const role = usersCollection.empty ? 'manager' : 'salesfloor';
+                
+                userProfile = {
+                    email: user.email,
+                    role: role,
+                    status: 'pending', // All new users must be approved
+                    requestTimestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                    approvedBy: null,
+                    approvalTimestamp: null,
+                    homeSiteId: null
+                };
+                await userRef.set(userProfile);
+                showToast(`Account created! A manager must approve your account before you can log in.`, 'success');
+            } else {
+                userProfile = userDoc.data();
+            }
             
-            // Check user status before proceeding
+            // Now, check the status of the profile we just fetched or created.
             if (userProfile.status === 'pending') {
                 showToast('Your account is awaiting approval from a manager.', 'info');
-                auth.signOut();
-                setLoading(false);
-                return;
+                auth.signOut(); // This will re-trigger onAuthStateChanged with user=null.
+                return; // Stop execution here. The sign-out will handle the UI and loader.
             }
             if (userProfile.status === 'denied') {
                 showToast('Your account request has been denied.', 'error');
-                auth.signOut();
-                setLoading(false);
-                return;
+                auth.signOut(); // This will re-trigger onAuthStateChanged with user=null.
+                return; // Stop execution here.
             }
 
+            // --- If we reach here, the user is approved and can log in ---
             appState.currentUser.uid = user.uid;
             appState.currentUser.email = user.email;
             appState.currentUser.role = userProfile.role;
@@ -2179,7 +2175,7 @@ document.addEventListener('DOMContentLoaded', function () {
             await initializeAppForUser();
             checkFiles();
             renderUnslottedReport();
-            setLoading(false);
+            setLoading(false); // Only turn off loading for a successful, approved login
 
         } else {
             // User is signed out.
@@ -2187,6 +2183,7 @@ document.addEventListener('DOMContentLoaded', function () {
             authContainer.classList.remove('hidden');
             appContainer.classList.add('hidden');
             userInfoDiv.classList.add('hidden');
+            setLoading(false); // Make sure loading is off when on the login screen
         }
     });
     
