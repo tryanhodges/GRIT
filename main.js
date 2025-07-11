@@ -100,35 +100,38 @@ function showConfirmationModal(title, message, onConfirm) {
 }
 
 
-// --- Firestore Data Functions ---
-async function saveDataToFirestore(collection, docId, data) {
+// --- Firestore Data Functions (Corrected for Subcollections) ---
+async function saveDataToFirestore(fullPath, data) {
     try {
-        await db.collection(collection).doc(docId).set(data, { merge: true });
+        const docRef = db.doc(fullPath);
+        await docRef.set(data, { merge: true });
     } catch (e) {
-        console.error("Error saving to Firestore", e);
+        console.error(`Error saving to Firestore path "${fullPath}":`, e);
         showToast("Error saving data to the cloud.", "error");
     }
 }
 
-async function loadDataFromFirestore(collection, docId) {
+async function loadDataFromFirestore(fullPath) {
     try {
-        const doc = await db.collection(collection).doc(docId).get();
+        const docRef = db.doc(fullPath);
+        const doc = await docRef.get();
         if (doc.exists) {
             return doc.data();
         }
         return null;
     } catch (e) {
-        console.error("Error loading from Firestore", e);
+        console.error(`Error loading from Firestore path "${fullPath}":`, e);
         showToast("Error loading data from the cloud.", "error");
         return null;
     }
 }
 
-async function deleteDocument(collection, docId) {
+async function deleteDocument(fullPath) {
     try {
-        await db.collection(collection).doc(docId).delete();
+        const docRef = db.doc(fullPath);
+        await docRef.delete();
     } catch (e) {
-        console.error("Error deleting document:", e);
+        console.error(`Error deleting document at path "${fullPath}":`, e);
         showToast("Error deleting data from the cloud.", "error");
     }
 }
@@ -204,7 +207,7 @@ async function initializeFromStorage() {
     appState.exclusionKeywords = [];
     
     const settingsPath = `sites/${appState.selectedSiteId}/configs/mainSettings`;
-    const storedSettings = await loadDataFromFirestore(settingsPath.split('/')[0], settingsPath.split('/')[1]);
+    const storedSettings = await loadDataFromFirestore(settingsPath);
 
     // Define default colors to fall back on
     const defaultColors = {
@@ -225,7 +228,6 @@ async function initializeFromStorage() {
         getEl('userInitials').value = storedSettings.userInitials || '';
         appState.userInitials = storedSettings.userInitials || '';
         
-        // Directly update app state from stored settings, with fallbacks
         appState.colorMap = storedSettings.colorMap || defaultColors;
         appState.cushionIndicatorColor = storedSettings.cushionIndicatorColor || defaultCushionColor;
     } else {
@@ -251,13 +253,13 @@ async function initializeFromStorage() {
     getEl('colorKidsPO').value = appState.colorMap.K.po;
     getEl('colorCushion').value = appState.cushionIndicatorColor;
 
-    const slottingData = await loadDataFromFirestore(`sites/${appState.selectedSiteId}/slotting`, 'current');
+    const slottingData = await loadDataFromFirestore(`sites/${appState.selectedSiteId}/slotting/current`);
     if (slottingData) {
         appState.finalSlottedData = slottingData.data || {};
         appState.unslottedItems = slottingData.unslotted || [];
     }
 
-    const cushionData = await loadDataFromFirestore('configs', 'cushionData');
+    const cushionData = await loadDataFromFirestore('configs/cushionData');
     if(cushionData) {
         appState.cushionLevels = cushionData.levels || [];
         appState.modelCushionAssignments = cushionData.assignments || {};
@@ -270,7 +272,7 @@ async function initializeFromStorage() {
     });
     renderPODetails();
 
-    const exclusionData = await loadDataFromFirestore(`sites/${appState.selectedSiteId}/configs`, 'exclusionKeywords');
+    const exclusionData = await loadDataFromFirestore(`sites/${appState.selectedSiteId}/configs/exclusionKeywords`);
     if (exclusionData) {
         appState.exclusionKeywords = exclusionData.keywords || [];
     }
@@ -322,7 +324,7 @@ async function saveSettings() {
         colorMap: appState.colorMap,
         cushionIndicatorColor: appState.cushionIndicatorColor
     };
-    await saveDataToFirestore(`sites/${appState.selectedSiteId}/configs`, 'mainSettings', settings);
+    await saveDataToFirestore(`sites/${appState.selectedSiteId}/configs/mainSettings`, settings);
     showToast('Settings saved for this site!', 'success');
     renderUI();
     renderMetricsPanel();
@@ -800,7 +802,7 @@ async function runSlottingProcess() {
             lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
             updatedBy: appState.currentUser.email
         };
-        await saveDataToFirestore(`sites/${appState.selectedSiteId}/slotting`, 'current', slottingResults);
+        await saveDataToFirestore(`sites/${appState.selectedSiteId}/slotting/current`, slottingResults);
 
 
         // The function doesn't need to save POs, the client does after parsing
@@ -1014,7 +1016,7 @@ async function markPOAsReceived(poKey) {
         }
     }
     
-    await saveDataToFirestore(`sites/${appState.selectedSiteId}/purchaseOrders`, poKey, poData);
+    await saveDataToFirestore(`sites/${appState.selectedSiteId}/purchaseOrders/${poKey}`, poData);
     renderPODetails();
     renderUI();
     renderMetricsPanel();
@@ -1386,7 +1388,7 @@ async function addExclusionKeyword() {
     const keyword = input.value.trim();
     if (keyword && !appState.exclusionKeywords.includes(keyword)) {
         appState.exclusionKeywords.push(keyword);
-        await saveDataToFirestore(`sites/${appState.selectedSiteId}/configs`, 'exclusionKeywords', { keywords: appState.exclusionKeywords });
+        await saveDataToFirestore(`sites/${appState.selectedSiteId}/configs/exclusionKeywords`, { keywords: appState.exclusionKeywords });
         renderExclusionList();
         showToast(`'${keyword}' added to exclusions.`, 'success');
         input.value = '';
@@ -1399,7 +1401,7 @@ async function addExclusionKeyword() {
 
 async function removeExclusionKeyword(keyword) {
     appState.exclusionKeywords = appState.exclusionKeywords.filter(kw => kw !== keyword);
-    await saveDataToFirestore(`sites/${appState.selectedSiteId}/configs`, 'exclusionKeywords', { keywords: appState.exclusionKeywords });
+    await saveDataToFirestore(`sites/${appState.selectedSiteId}/configs/exclusionKeywords`, { keywords: appState.exclusionKeywords });
     renderExclusionList();
     showToast(`'${keyword}' removed from exclusions.`, 'info');
 }
@@ -1410,7 +1412,7 @@ async function saveCushionData() {
         levels: appState.cushionLevels,
         assignments: appState.modelCushionAssignments
     };
-    await saveDataToFirestore('configs', 'cushionData', dataToSave);
+    await saveDataToFirestore('configs/cushionData', dataToSave);
 }
 
 async function addCushionLevel() {
@@ -1811,426 +1813,4 @@ async function handleSignUp() {
     setLoading(true, "Creating account...");
     try {
         await auth.createUserWithEmailAndPassword(email, password);
-        // onAuthStateChanged will handle creating the user profile
-    } catch (error) {
-        showAuthError(error.message);
-    } finally {
-        setLoading(false);
-    }
-}
-
-async function handleSignIn() {
-    clearAuthError();
-    const email = getEl('email').value;
-    const password = getEl('password').value;
-
-    if (!email || !password) {
-        showAuthError("Please enter both email and password.");
-        return;
-    }
-    
-    setLoading(true, "Logging in...");
-    try {
-        await auth.signInWithEmailAndPassword(email, password);
-        // onAuthStateChanged will handle the rest
-    } catch (error) {
-        showAuthError(error.message);
-    } finally {
-        setLoading(false);
-    }
-}
-
-function handleSignOut() {
-    auth.signOut();
-}
-
-function adjustUiForRole(role) {
-    const isManager = role === 'manager';
-    
-    // Toggle visibility of all manager-only elements
-    document.querySelectorAll('.manager-only').forEach(el => {
-        el.classList.toggle('hidden', !isManager);
-    });
-    
-    updateUiForSiteSelection();
-}
-
-async function renderUserManagementModal() {
-    const container = getEl('user-list-container');
-    container.innerHTML = '<div class="spinner"></div>'; // Show loader
-    
-    try {
-        const usersSnapshot = await db.collection('users').get();
-        container.innerHTML = '';
-        if (usersSnapshot.empty) {
-            container.innerHTML = '<p class="text-gray-500">No other users found.</p>';
-            return;
-        }
-
-        usersSnapshot.docs.forEach(doc => {
-            const user = doc.data();
-            const userId = doc.id;
-            
-            const userEl = document.createElement('div');
-            userEl.className = 'flex justify-between items-center p-3 rounded-lg bg-gray-50 border';
-            
-            const emailSpan = `<span class="font-semibold">${user.email}</span>`;
-            const selfLabel = userId === appState.currentUser.uid ? '<span class="text-xs font-bold text-indigo-600 ml-2">(You)</span>' : '';
-            
-            const roleSelect = `
-                <select data-uid="${userId}" class="role-select border-gray-300 rounded-md shadow-sm" ${userId === appState.currentUser.uid ? 'disabled' : ''}>
-                    <option value="salesfloor" ${user.role === 'salesfloor' ? 'selected' : ''}>Salesfloor</option>
-                    <option value="manager" ${user.role === 'manager' ? 'selected' : ''}>Manager</option>
-                </select>
-            `;
-            
-            const deleteBtn = `<button data-uid="${userId}" data-email="${user.email}" class="delete-user-btn text-red-500 hover:text-red-700 disabled:opacity-50" ${userId === appState.currentUser.uid ? 'disabled' : ''}>&times;</button>`;
-            
-            userEl.innerHTML = `
-                <div>${emailSpan} ${selfLabel}</div>
-                <div class="flex items-center gap-4">${roleSelect} ${deleteBtn}</div>
-            `;
-            container.appendChild(userEl);
-        });
-
-        // Add event listeners after rendering
-        document.querySelectorAll('.role-select').forEach(select => {
-            select.addEventListener('change', (e) => updateUserRole(e.target.dataset.uid, e.target.value));
-        });
-        document.querySelectorAll('.delete-user-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => deleteUser(e.target.dataset.uid, e.target.dataset.email));
-        });
-
-    } catch (error) {
-        console.error("Error fetching users:", error);
-        container.innerHTML = '<p class="text-red-500">Could not load user list.</p>';
-    }
-}
-
-async function updateUserRole(uid, newRole) {
-    setLoading(true, `Updating role to ${newRole}...`);
-    try {
-        await db.collection('users').doc(uid).update({ role: newRole });
-        showToast("User role updated successfully.", "success");
-    } catch (error) {
-        console.error("Error updating role:", error);
-        showToast("Failed to update user role.", "error");
-    } finally {
-        setLoading(false);
-    }
-}
-
-async function deleteUser(uid, email) {
-    showConfirmationModal('Delete User?', `Are you sure you want to delete the user ${email}? This will remove their access permanently.`, async () => {
-        setLoading(true, `Deleting user ${email}...`);
-        try {
-            // This only deletes the Firestore record, not the actual Firebase Auth user.
-            // A Cloud Function is required to delete the auth user securely.
-            await db.collection('users').doc(uid).delete();
-            showToast("User record deleted. They can no longer log in with a role.", "success");
-            renderUserManagementModal(); // Refresh the list
-        } catch (error) {
-            console.error("Error deleting user record:", error);
-            showToast("Failed to delete user record.", "error");
-        } finally {
-            setLoading(false);
-        }
-    });
-}
-
-// --- Site Management ---
-async function loadSites() {
-    const sitesSnapshot = await db.collection('sites').get();
-    appState.sites = sitesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    
-    const selector = getEl('site-selector');
-    selector.innerHTML = '';
-    if (appState.sites.length === 0) {
-        selector.innerHTML = '<option value="">No sites available</option>';
-    } else {
-        appState.sites.forEach(site => {
-            const option = document.createElement('option');
-            option.value = site.id;
-            option.textContent = site.name;
-            selector.appendChild(option);
-        });
-    }
-}
-
-async function createNewSite() {
-    const input = getEl('new-site-name');
-    const siteName = input.value.trim();
-    if (!siteName) {
-        showToast("Please enter a site name.", "error");
-        return;
-    }
-    const siteId = siteName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-    
-    setLoading(true, `Creating site: ${siteName}...`);
-    try {
-        await saveDataToFirestore('sites', siteId, { name: siteName });
-        input.value = '';
-        showToast("Site created successfully!", "success");
-        await loadSites(); // Refresh site list
-        renderSiteManagementModal();
-    } catch (error) {
-        showToast("Error creating site.", "error");
-    } finally {
-        setLoading(false);
-    }
-}
-
-async function deleteSite(siteId, siteName) {
-    showConfirmationModal('Delete Site?', `Are you sure you want to delete ${siteName}? All associated data will be permanently lost.`, async () => {
-        setLoading(true, `Deleting site: ${siteName}...`);
-        try {
-            await deleteDocument('sites', siteId);
-            // In a real-world app, a Cloud Function would be needed to delete all subcollections.
-            showToast("Site deleted successfully.", "success");
-            
-            // If the deleted site was the selected one, reset the selection.
-            if (appState.selectedSiteId === siteId) {
-                appState.selectedSiteId = null;
-            }
-            
-            await loadSites(); // Refresh site list in the dropdown
-            renderSiteManagementModal(); // Re-render the modal list
-
-            // If there are other sites, select the first one. Otherwise, clear the view.
-            if (appState.sites.length > 0) {
-                const siteSelector = getEl('site-selector');
-                siteSelector.value = appState.sites[0].id;
-                appState.selectedSiteId = appState.sites[0].id;
-                await initializeFromStorage();
-            } else {
-                appState.selectedSiteId = null;
-                // Clear the UI
-                getEl('visualization-container').innerHTML = '';
-                getEl('overview-controls').classList.add('hidden');
-                getEl('overviewSubtitle').textContent = 'No sites found. A manager must create a site to begin.';
-                getEl('overviewSubtitle').classList.remove('hidden');
-                updateUiForSiteSelection();
-            }
-        } catch (error) {
-            showToast("Error deleting site.", "error");
-        } finally {
-            setLoading(false);
-        }
-    });
-}
-
-async function setHomeSite() {
-    const selectedSiteId = getEl('site-selector').value;
-    if (!selectedSiteId || appState.sites.length === 0) {
-        showToast("Please select a valid site first.", "error");
-        return;
-    }
-    
-    setLoading(true, "Setting home site...");
-    try {
-        await saveDataToFirestore('users', appState.currentUser.uid, { homeSiteId: selectedSiteId });
-        appState.currentUser.homeSiteId = selectedSiteId;
-        showToast("Home site saved!", "success");
-    } catch (error) {
-        showToast("Error setting home site.", "error");
-    } finally {
-        setLoading(false);
-    }
-}
-
-function renderSiteManagementModal() {
-    const container = getEl('site-list-container');
-    container.innerHTML = '';
-    if (appState.sites.length === 0) {
-        container.innerHTML = '<p class="text-gray-500">No sites created yet.</p>';
-        return;
-    }
-    appState.sites.forEach(site => {
-        const el = document.createElement('div');
-        el.className = 'flex justify-between items-center p-3 rounded-lg bg-gray-50 border';
-        el.innerHTML = `
-            <span class="font-semibold">${site.name}</span>
-            <button data-site-id="${site.id}" data-site-name="${site.name}" class="delete-site-btn text-red-500 hover:text-red-700">&times;</button>
-        `;
-        container.appendChild(el);
-    });
-
-    document.querySelectorAll('.delete-site-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => deleteSite(e.target.dataset.siteId, e.target.dataset.siteName));
-    });
-}
-
-function updateUiForSiteSelection() {
-    const hasSite = !!appState.selectedSiteId;
-    document.querySelectorAll('.file-input-btn, #slotBtn').forEach(el => {
-        el.disabled = !hasSite;
-    });
-}
-
-
-// --- START: Main Execution ---
-document.addEventListener('DOMContentLoaded', function () {
-    const authContainer = getEl('auth-container');
-    const appContainer = getEl('app-container');
-    const userInfoDiv = getEl('user-info');
-    const userEmailSpan = getEl('user-email');
-
-    // Auth Event Listeners
-    getEl('login-btn').addEventListener('click', handleSignIn);
-    getEl('google-login-btn').addEventListener('click', handleGoogleSignIn);
-    getEl('signup-btn').addEventListener('click', handleSignUp);
-    getEl('logout-btn').addEventListener('click', handleSignOut);
-
-    auth.onAuthStateChanged(async (user) => {
-        if (user) {
-            // User is signed in.
-            setLoading(true, 'Verifying user...');
-            const userProfile = await getOrCreateUserProfile(user);
-            
-            appState.currentUser.uid = user.uid;
-            appState.currentUser.email = user.email;
-            appState.currentUser.role = userProfile.role;
-            appState.currentUser.homeSiteId = userProfile.homeSiteId || null;
-
-            if(userEmailSpan) {
-                userEmailSpan.textContent = user.email;
-            }
-            userInfoDiv.classList.remove('hidden');
-            
-            authContainer.classList.add('hidden');
-            appContainer.classList.remove('hidden');
-            
-            adjustUiForRole(appState.currentUser.role);
-            
-            await initializeAppForUser();
-            checkFiles();
-            renderUnslottedReport();
-            setLoading(false);
-
-        } else {
-            // User is signed out.
-            appState.currentUser = { uid: null, email: null, role: null, homeSiteId: null };
-            authContainer.classList.remove('hidden');
-            appContainer.classList.add('hidden');
-            userInfoDiv.classList.add('hidden');
-        }
-    });
-    
-    // Moved initializeEventListeners out of onAuthStateChanged to prevent duplication
-    initializeEventListeners();
-});
-
-function initializeEventListeners() {
-    // Event Listeners
-    getEl('prevSlottingFile').addEventListener('change', (e) => handleFileChange(e, 'prevSlottingFileName'));
-    getEl('inventoryFile').addEventListener('change', (e) => handleMultiFileChange(e, 'inventoryFileNames', 'clearInventoryBtn'));
-    getEl('poFile').addEventListener('change', (e) => handleMultiFileChange(e, 'poFileNames', 'clearPOsBtn'));
-
-    getEl('slotBtn').addEventListener('click', runSlottingProcess);
-    getEl('viewToggleBtn').addEventListener('click', toggleView);
-    getEl('downloadPdfBtn').addEventListener('click', downloadInboundPDF);
-    getEl('downloadCsvBtn').addEventListener('click', () => {
-        const filename = generateUniqueFilename('Slotting Table');
-        downloadFile(generateCSV(appState.finalSlottedData), filename);
-    });
-    getEl('downloadUnslottedBtn').addEventListener('click', downloadUnslottedCSV);
-
-
-    getEl('search-btn').addEventListener('click', executeSearch);
-    getEl('clearInventoryBtn').addEventListener('click', clearLoadedInventory);
-    getEl('clearPOsBtn').addEventListener('click', clearLoadedPOs);
-    getEl('add-exclusion-btn').addEventListener('click', addExclusionKeyword);
-    getEl('add-cushion-level-btn').addEventListener('click', addCushionLevel);
-    getEl('clearFiltersBtn').addEventListener('click', clearFilters);
-
-    // Filter dropdowns
-    getEl('brand-filter').addEventListener('change', () => { updateFilterDropdowns(); renderUI(); });
-    getEl('model-filter').addEventListener('change', () => { updateFilterDropdowns(); renderUI(); });
-    getEl('color-filter').addEventListener('change', () => { updateFilterDropdowns(); renderUI(); });
-    getEl('size-filter').addEventListener('change', () => { renderUI(); });
-
-
-    // Template downloads
-    getEl('invTemplateBtn').addEventListener('click', (e) => { e.preventDefault(); downloadFile(`"System ID","UPC","EAN","Custom SKU","Manufact. SKU","Item","Remaining","total cost","avg. cost","sale price","margin"\n"ignore","ignore","ignore","ignore","ignore","Cloudsurfer | Undyed/White 11.5","2","ignore","ignore","ignore","ignore"`, 'inventory_template.csv'); });
-    getEl('poTemplateBtn').addEventListener('click', (e) => { e.preventDefault(); downloadFile(`"System ID","Item","UPC","EAN","Custom SKU","Manufact. SKU","#","Vendor ID","special order qty","Retail price","Qty. On Hand","Qty. On Order","Desired Inventory Level","Order Qty"\n"ignore","Cloud 5 | Black/White 10.5","ignore","ignore","ignore","ignore","ignore","ignore","ignore","ignore","ignore","ignore","ignore","5"`, 'po_template.csv'); });
-
-    // Tab logic
-    const tabs = document.querySelectorAll('.tab-button');
-    const tabContents = document.querySelectorAll('.tab-content');
-    tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-            tabs.forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            const target = tab.getAttribute('data-tab');
-            tabContents.forEach(content => {
-                content.classList.remove('active');
-                if (content.id === `tab-${target}`) {
-                    content.classList.add('active');
-                }
-            });
-        });
-    });
-
-    // Help dropdown logic
-    const helpBtn = getEl('help-btn');
-    const helpDropdown = getEl('help-dropdown');
-    helpBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        helpDropdown.classList.toggle('hidden');
-    });
-
-    // Settings Modal Logic
-    const settingsModal = getEl('settings-modal');
-    getEl('open-settings-btn').addEventListener('click', () => settingsModal.classList.add('visible'));
-    getEl('close-settings-btn').addEventListener('click', () => settingsModal.classList.remove('visible'));
-    getEl('save-settings-btn').addEventListener('click', () => {
-        saveSettings();
-        settingsModal.classList.remove('visible');
-    });
-
-    // User Management Modal Logic
-    const userManagementModal = getEl('user-management-modal');
-    getEl('open-user-management-btn').addEventListener('click', () => {
-        renderUserManagementModal(); // Re-fetch users every time it's opened
-        userManagementModal.classList.add('visible');
-    });
-    getEl('close-user-management-btn').addEventListener('click', () => userManagementModal.classList.remove('visible'));
-    userManagementModal.addEventListener('click', (e) => {
-        if (e.target === userManagementModal) {
-            userManagementModal.classList.remove('visible');
-        }
-    });
-
-    // Site Management Modal Logic
-    const siteManagementModal = getEl('site-management-modal');
-    getEl('open-site-management-btn').addEventListener('click', () => {
-        renderSiteManagementModal();
-        siteManagementModal.classList.add('visible');
-    });
-    getEl('close-site-management-btn').addEventListener('click', () => siteManagementModal.classList.remove('visible'));
-    siteManagementModal.addEventListener('click', (e) => {
-        if (e.target === siteManagementModal) {
-            siteManagementModal.classList.remove('visible');
-        }
-    });
-    getEl('create-site-btn').addEventListener('click', createNewSite);
-    getEl('set-home-site-btn').addEventListener('click', setHomeSite);
-    getEl('site-selector').addEventListener('change', (e) => {
-        appState.selectedSiteId = e.target.value;
-        initializeFromStorage();
-    });
-
-
-    // Global click listener to close dropdowns/modals
-    document.addEventListener('click', (e) => {
-        if (helpDropdown && !helpDropdown.contains(e.target) && !helpBtn.contains(e.target)) {
-            helpDropdown.classList.add('hidden');
-        }
-    });
-    settingsModal.addEventListener('click', (e) => {
-        if (e.target === settingsModal) {
-            settingsModal.classList.remove('visible');
-        }
-    });
-}
-// --- END: Main Execution ---
+        // onAuthStateChanged will handle creating the user prof
