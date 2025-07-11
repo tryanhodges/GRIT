@@ -109,7 +109,7 @@ exports.handler = async (event, context) => {
             const { inventoryData, poData, previousSlottingData, settings, cushionData, exclusionKeywords } = JSON.parse(event.body);
 
             // ===================================================================
-            // ====> YOUR CORE SLOTTING LOGIC (UNCHANGED)
+            // ====> CORE SLOTTING LOGIC
             // ===================================================================
             
             // 1. Process Previous Slotting Data
