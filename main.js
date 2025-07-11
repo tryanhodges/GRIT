@@ -207,52 +207,50 @@ async function initializeFromStorage() {
     appState.exclusionKeywords = [];
     
     // Define default values
-    const defaultColors = {
-        'M': { name: 'Men', onHand: '#5468C1', po: '#a9b3e0' },
-        'W': { name: 'Women', onHand: '#f846f0', po: '#fbc2f8' },
-        'K': { name: 'Kids', onHand: '#64d669', po: '#b1ebc4' },
-        'Y': { name: 'Kids', onHand: '#64d669', po: '#b1ebc4' }
+    const defaultSettings = {
+        rackCount: 26,
+        sectionsPerRack: 8,
+        stacksPerSection: 5,
+        slotsPerStack: 5,
+        excludeRacks: '',
+        includeKids: false,
+        userInitials: '',
+        colorMap: {
+            'M': { name: 'Men', onHand: '#5468C1', po: '#a9b3e0' },
+            'W': { name: 'Women', onHand: '#f846f0', po: '#fbc2f8' },
+            'K': { name: 'Kids', onHand: '#64d669', po: '#b1ebc4' },
+            'Y': { name: 'Kids', onHand: '#64d669', po: '#b1ebc4' }
+        },
+        cushionIndicatorColor: '#6b7280'
     };
-    const defaultCushionColor = '#6b7280';
 
-    // *** FIX: Start by applying default settings ***
-    getEl('rackCount').value = 26;
-    getEl('sectionsPerRack').value = 8;
-    getEl('stacksPerSection').value = 5;
-    getEl('slotsPerStack').value = 5;
-    getEl('excludeRacks').value = '';
-    getEl('includeKids').checked = false;
-    getEl('userInitials').value = '';
-    appState.userInitials = '';
-    appState.colorMap = defaultColors;
-    appState.cushionIndicatorColor = defaultCushionColor;
-
-    // *** FIX: Now, attempt to load stored settings and override the defaults ***
+    // Load stored settings
     const settingsPath = `sites/${appState.selectedSiteId}/configs/mainSettings`;
     const storedSettings = await loadDataFromFirestore(settingsPath);
 
-    if (storedSettings) {
-        getEl('rackCount').value = storedSettings.rackCount || 26;
-        getEl('sectionsPerRack').value = storedSettings.sectionsPerRack || 8;
-        getEl('stacksPerSection').value = storedSettings.stacksPerSection || 5;
-        getEl('slotsPerStack').value = storedSettings.slotsPerStack || 5;
-        getEl('excludeRacks').value = storedSettings.excludeRacks || '';
-        getEl('includeKids').checked = storedSettings.includeKids || false;
-        getEl('userInitials').value = storedSettings.userInitials || '';
-        appState.userInitials = storedSettings.userInitials || '';
-        
-        appState.colorMap = storedSettings.colorMap || defaultColors;
-        appState.cushionIndicatorColor = storedSettings.cushionIndicatorColor || defaultCushionColor;
-    }
+    // Merge stored settings over defaults. If storedSettings is null, this uses defaults.
+    const finalSettings = { ...defaultSettings, ...storedSettings };
 
-    // Now that appState is correct, update the UI inputs from the state
-    getEl('colorMen').value = appState.colorMap.M.onHand;
-    getEl('colorMenPO').value = appState.colorMap.M.po;
-    getEl('colorWomen').value = appState.colorMap.W.onHand;
-    getEl('colorWomenPO').value = appState.colorMap.W.po;
-    getEl('colorKids').value = appState.colorMap.K.onHand;
-    getEl('colorKidsPO').value = appState.colorMap.K.po;
-    getEl('colorCushion').value = appState.cushionIndicatorColor;
+    // Update UI elements from the final, merged settings
+    getEl('rackCount').value = finalSettings.rackCount;
+    getEl('sectionsPerRack').value = finalSettings.sectionsPerRack;
+    getEl('stacksPerSection').value = finalSettings.stacksPerSection;
+    getEl('slotsPerStack').value = finalSettings.slotsPerStack;
+    getEl('excludeRacks').value = finalSettings.excludeRacks;
+    getEl('includeKids').checked = finalSettings.includeKids;
+    getEl('userInitials').value = finalSettings.userInitials;
+    getEl('colorMen').value = finalSettings.colorMap.M.onHand;
+    getEl('colorMenPO').value = finalSettings.colorMap.M.po;
+    getEl('colorWomen').value = finalSettings.colorMap.W.onHand;
+    getEl('colorWomenPO').value = finalSettings.colorMap.W.po;
+    getEl('colorKids').value = finalSettings.colorMap.K.onHand;
+    getEl('colorKidsPO').value = finalSettings.colorMap.K.po;
+    getEl('colorCushion').value = finalSettings.cushionIndicatorColor;
+
+    // Update appState from the final, merged settings
+    appState.userInitials = finalSettings.userInitials;
+    appState.colorMap = finalSettings.colorMap;
+    appState.cushionIndicatorColor = finalSettings.cushionIndicatorColor;
 
     const slottingData = await loadDataFromFirestore(`sites/${appState.selectedSiteId}/slotting/current`);
     if (slottingData) {
@@ -334,32 +332,38 @@ async function saveSettings() {
 
 async function executeSearch() {
     const searchTerm = getEl('searchInput').value.toLowerCase().trim();
+    if (!appState.selectedSiteId) {
+        showToast("Please select a site to search.", "error");
+        return;
+    }
+
+    // If search is cleared, reload data for the current site
     if (!searchTerm) {
-        // If search is cleared, reload data for the current site
         await initializeFromStorage();
         return;
     }
 
-    setLoading(true, `Searching all sites for "${searchTerm}"...`);
+    setLoading(true, `Searching site ${appState.selectedSiteId} for "${searchTerm}"...`);
     try {
-        // This is a simplified search. A real-world app would use a dedicated search service like Algolia or Typesense.
-        const querySnapshot = await db.collectionGroup('slotting').get();
+        // *** MODIFIED: Query only the current site's slotting document ***
+        const slottingData = await loadDataFromFirestore(`sites/${appState.selectedSiteId}/slotting/current`);
         let searchResults = {};
-        querySnapshot.forEach(doc => {
-            const data = doc.data().data;
-            for (const loc in data) {
-                const item = data[loc];
+
+        if (slottingData && slottingData.data) {
+            for (const loc in slottingData.data) {
+                const item = slottingData.data[loc];
                 const itemText = `${item.Brand} ${item.Model} ${item.Color} ${item.Size}`.toLowerCase();
                 if (itemText.includes(searchTerm)) {
                     searchResults[loc] = item;
                 }
             }
-        });
+        }
+        
         appState.finalSlottedData = searchResults;
         renderUI();
-        showToast(`${Object.keys(searchResults).length} items found across all sites.`);
+        showToast(`${Object.keys(searchResults).length} items found in this site.`);
     } catch (error) {
-        console.error("Error during global search:", error);
+        console.error("Error during site search:", error);
         showToast("An error occurred during search.", "error");
     } finally {
         setLoading(false);
