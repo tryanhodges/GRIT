@@ -1,8 +1,11 @@
+# This tells Netlify where your site's main files (like index.html) are.
+# "." means the root of your repository.
 [build]
-  # Specifies the root directory of your site for publishing.
   publish = "."
 
+# This tells Netlify where to find your serverless functions.
 [functions]
   directory = "netlify/functions/"
-  # Increase the timeout for all functions to 26 seconds
+  
+  # This gives your slotting function more time to run, preventing timeouts.
   timeout = 26
