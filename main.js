@@ -206,6 +206,15 @@ async function initializeFromStorage() {
     const settingsPath = `sites/${appState.selectedSiteId}/configs/mainSettings`;
     const storedSettings = await loadDataFromFirestore(settingsPath.split('/')[0], settingsPath.split('/')[1]);
 
+    // Define default colors to fall back on
+    const defaultColors = {
+        'M': { name: 'Men', onHand: '#5468C1', po: '#a9b3e0' },
+        'W': { name: 'Women', onHand: '#f846f0', po: '#fbc2f8' },
+        'K': { name: 'Kids', onHand: '#64d669', po: '#b1ebc4' },
+        'Y': { name: 'Kids', onHand: '#64d669', po: '#b1ebc4' }
+    };
+    const defaultCushionColor = '#6b7280';
+
     if (storedSettings) {
         getEl('rackCount').value = storedSettings.rackCount || 26;
         getEl('sectionsPerRack').value = storedSettings.sectionsPerRack || 8;
@@ -215,15 +224,24 @@ async function initializeFromStorage() {
         getEl('includeKids').checked = storedSettings.includeKids || false;
         getEl('userInitials').value = storedSettings.userInitials || '';
         appState.userInitials = storedSettings.userInitials || '';
-        getEl('colorMen').value = storedSettings.colorMap?.M.onHand || '#5468C1';
-        getEl('colorMenPO').value = storedSettings.colorMap?.M.po || '#a9b3e0';
-        getEl('colorWomen').value = storedSettings.colorMap?.W.onHand || '#f846f0';
-        getEl('colorWomenPO').value = storedSettings.colorMap?.W.po || '#fbc2f8';
-        getEl('colorKids').value = storedSettings.colorMap?.K.onHand || '#64d669';
-        getEl('colorKidsPO').value = storedSettings.colorMap?.K.po || '#b1ebc4';
-        getEl('colorCushion').value = storedSettings.cushionIndicatorColor || '#6b7280';
-        updateColorState();
+        
+        // *** FIX: Directly update app state from stored settings, with fallbacks ***
+        appState.colorMap = storedSettings.colorMap || defaultColors;
+        appState.cushionIndicatorColor = storedSettings.cushionIndicatorColor || defaultCushionColor;
+    } else {
+        // If no settings are stored for this site, reset colors to defaults
+        appState.colorMap = defaultColors;
+        appState.cushionIndicatorColor = defaultCushionColor;
     }
+
+    // *** FIX: Now that appState is correct, update the UI inputs from the state ***
+    getEl('colorMen').value = appState.colorMap.M.onHand;
+    getEl('colorMenPO').value = appState.colorMap.M.po;
+    getEl('colorWomen').value = appState.colorMap.W.onHand;
+    getEl('colorWomenPO').value = appState.colorMap.W.po;
+    getEl('colorKids').value = appState.colorMap.K.onHand;
+    getEl('colorKidsPO').value = appState.colorMap.K.po;
+    getEl('colorCushion').value = appState.cushionIndicatorColor;
 
     const slottingData = await loadDataFromFirestore(`sites/${appState.selectedSiteId}/slotting`, 'current');
     if (slottingData) {

@@ -1,6 +1,7 @@
 [build]
-  command = "npm install"
-  
+  # Specifies the root directory of your site for publishing.
+  publish = "."
+
 [functions]
   directory = "netlify/functions/"
   # Increase the timeout for all functions to 26 seconds
