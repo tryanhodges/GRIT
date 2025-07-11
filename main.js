@@ -202,6 +202,7 @@ async function initializeFromStorage() {
     // Reset local state before loading new site data
     appState.finalSlottedData = {};
     appState.unslottedItems = [];
+    appState.exclusionKeywords = [];
     
     const settingsPath = `sites/${appState.selectedSiteId}/configs/mainSettings`;
     const storedSettings = await loadDataFromFirestore(settingsPath.split('/')[0], settingsPath.split('/')[1]);
@@ -225,7 +226,7 @@ async function initializeFromStorage() {
         getEl('userInitials').value = storedSettings.userInitials || '';
         appState.userInitials = storedSettings.userInitials || '';
         
-        // *** FIX: Directly update app state from stored settings, with fallbacks ***
+        // Directly update app state from stored settings, with fallbacks
         appState.colorMap = storedSettings.colorMap || defaultColors;
         appState.cushionIndicatorColor = storedSettings.cushionIndicatorColor || defaultCushionColor;
     } else {
@@ -234,7 +235,7 @@ async function initializeFromStorage() {
         appState.cushionIndicatorColor = defaultCushionColor;
     }
 
-    // *** FIX: Now that appState is correct, update the UI inputs from the state ***
+    // Now that appState is correct, update the UI inputs from the state
     getEl('colorMen').value = appState.colorMap.M.onHand;
     getEl('colorMenPO').value = appState.colorMap.M.po;
     getEl('colorWomen').value = appState.colorMap.W.onHand;
