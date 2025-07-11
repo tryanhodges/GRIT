@@ -3,7 +3,9 @@
 [build]
   publish = "."
 
+# This tells Netlify where to find your serverless functions.
 [functions]
-  directory = "netlify/functions/"
+  directory = "netlify/functions"
+  
   # This gives your slotting function more time to run, preventing timeouts.
   timeout = 26
