@@ -56,7 +56,7 @@ const appState = {
     exclusionKeywords: [],
     cushionLevels: [],
     modelCushionAssignments: {},
-    allKnownModels: [], // NEW: To store all unique models for cushioning
+    allKnownModels: [], // To store all unique models for cushioning
     currentView: 'grid',
     selectedRackId: 1,
     brandChart: null,
@@ -603,9 +603,9 @@ function runLocalSlottingAlgorithm(data) {
         if (lines.length < 2) return;
 
         const headerMap = createHeaderMap(lines[0]);
-        const itemIndex = headerMap['item'];
-        const qtyIndex = headerMap['quantity'];
-        const checkedInIndex = headerMap['checked in'];
+        const itemIndex = headerMap.get('item');
+        const qtyIndex = headerMap.get('quantity');
+        const checkedInIndex = headerMap.get('checked in');
 
         if (itemIndex === undefined || qtyIndex === undefined || checkedInIndex === undefined) {
              console.warn(`Skipping PO file ${poFile.name}: Missing 'Item', 'Quantity', or 'Checked In' column.`);
@@ -937,9 +937,9 @@ async function parsePOFiles(fileList) {
         if (lines.length < 2) continue;
 
         const headerMap = createHeaderMap(lines[0]);
-        const itemIndex = headerMap['item'];
-        const qtyIndex = headerMap['quantity'];
-        const checkedInIndex = headerMap['checked in'];
+        const itemIndex = headerMap.get('item');
+        const qtyIndex = headerMap.get('quantity');
+        const checkedInIndex = headerMap.get('checked in');
 
         if (itemIndex === undefined || qtyIndex === undefined || checkedInIndex === undefined) {
             showToast(`Skipping ${file.name}: Missing 'Item', 'Quantity', or 'Checked In' column.`, 'error');
