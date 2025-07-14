@@ -1,11 +1,14 @@
 /**
  * @file ui.js
  * @description Manages all DOM manipulation, UI rendering, and user feedback functions.
+ * This module is now purely for rendering and does not contain event handling logic.
  */
 
 import { appState } from './state.js';
-import { getEl } from './utils.js';
-import { markPOAsReceived, deleteSite, handleApprovalAction, updateUserRole, deleteUser, addCushionLevel, removeCushionLevel, saveCushionData, getDragAfterElement } from './main.js';
+import { getEl, toTitleCase } from './utils.js';
+import { db } from './firebase.js';
+import { collection, getDocs } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
+
 
 // --- UI Feedback (Toast, Loader, Modal) ---
 
@@ -27,8 +30,11 @@ export function showToast(message, type = 'info') {
 }
 
 export function setLoading(isLoading, message = '') {
-    getEl('loading-overlay').style.display = isLoading ? 'flex' : 'none';
-    getEl('loading-message').textContent = message;
+    const overlay = getEl('loading-overlay');
+    if (overlay) {
+        overlay.style.display = isLoading ? 'flex' : 'none';
+        getEl('loading-message').textContent = message;
+    }
 }
 
 export function showConfirmationModal(title, message, onConfirm) {
@@ -40,6 +46,13 @@ export function showConfirmationModal(title, message, onConfirm) {
     const confirmBtn = getEl('confirmation-confirm-btn');
     const cancelBtn = getEl('confirmation-cancel-btn');
 
+    // Use .cloneNode to remove previous listeners
+    const newConfirmBtn = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+
+    const newCancelBtn = cancelBtn.cloneNode(true);
+    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+
     const confirmHandler = () => {
         onConfirm();
         closeModal();
@@ -47,59 +60,62 @@ export function showConfirmationModal(title, message, onConfirm) {
 
     const closeModal = () => {
         modal.classList.remove('visible');
-        confirmBtn.removeEventListener('click', confirmHandler);
-        cancelBtn.removeEventListener('click', closeModal);
     };
 
-    confirmBtn.addEventListener('click', confirmHandler);
-    cancelBtn.addEventListener('click', closeModal);
+    newConfirmBtn.addEventListener('click', confirmHandler);
+    newCancelBtn.addEventListener('click', closeModal);
 }
 
 // --- Main Rendering Functions ---
 
 export function renderUI() {
-    if (Object.keys(appState.finalSlottedData).length === 0) {
-        getEl('visualization-container').innerHTML = '';
-        getEl('overview-controls').classList.add('hidden');
-        getEl('overviewSubtitle').classList.remove('hidden');
-        return;
-    }
-    getEl('overview-controls').classList.remove('hidden');
-    getEl('overviewSubtitle').classList.add('hidden');
-
-    const container = getEl('visualization-container');
-    container.innerHTML = '';
-    const totalRacks = parseInt(getEl('rackCount')?.value) || 26;
-
-    const searchTerm = getEl('searchInput')?.value.toLowerCase() || '';
+    // MODIFIED: Moved search/filter logic here from main.js
+    const searchTerm = getEl('searchInput')?.value.toLowerCase().trim() || '';
     const brandFilter = getEl('brand-filter').value;
     const modelFilter = getEl('model-filter').value;
     const colorFilter = getEl('color-filter').value;
     const sizeFilter = getEl('size-filter').value;
 
-    let matchingSlots = new Set();
-    let matchingRacks = new Set();
-    let isFiltering = searchTerm || brandFilter || modelFilter || colorFilter || sizeFilter;
+    const isFiltering = searchTerm || brandFilter || modelFilter || colorFilter || sizeFilter;
+    let filteredData = appState.finalSlottedData;
 
     if (isFiltering) {
-        for (const [loc, item] of Object.entries(appState.finalSlottedData)) {
-            const textMatch = !searchTerm || (item.Brand?.toLowerCase().includes(searchTerm) ||
-                             item.Model?.toLowerCase().includes(searchTerm) ||
-                             item.Color?.toLowerCase().includes(searchTerm) ||
-                             item.Size?.toString().toLowerCase().includes(searchTerm));
-
+        filteredData = Object.entries(appState.finalSlottedData).reduce((acc, [loc, item]) => {
+            const textMatch = !searchTerm || (
+                item.Brand?.toLowerCase().includes(searchTerm) ||
+                item.Model?.toLowerCase().includes(searchTerm) ||
+                item.Color?.toLowerCase().includes(searchTerm) ||
+                item.Size?.toString().toLowerCase().includes(searchTerm)
+            );
             const brandMatch = !brandFilter || item.Brand === brandFilter;
             const modelMatch = !modelFilter || item.Model === modelFilter;
             const colorMatch = !colorFilter || item.Color === colorFilter;
             const sizeMatch = !sizeFilter || item.Size === sizeFilter;
 
             if (textMatch && brandMatch && modelMatch && colorMatch && sizeMatch) {
-                matchingSlots.add(loc);
-                matchingRacks.add(loc.split('-')[0]);
+                acc[loc] = item;
             }
-        }
+            return acc;
+        }, {});
     }
 
+    if (Object.keys(appState.finalSlottedData).length === 0) {
+        getEl('visualization-container').innerHTML = '';
+        getEl('overview-controls').classList.add('hidden');
+        getEl('overviewSubtitle').classList.remove('hidden');
+        return;
+    }
+    
+    getEl('overview-controls').classList.remove('hidden');
+    getEl('overviewSubtitle').classList.add('hidden');
+
+    const container = getEl('visualization-container');
+    container.innerHTML = '';
+    const totalRacks = parseInt(getEl('rackCount')?.value) || 26;
+    
+    const matchingSlots = new Set(Object.keys(filteredData));
+    const matchingRacks = new Set(Array.from(matchingSlots).map(loc => loc.split('-')[0]));
+    
     if (appState.currentView === 'grid') {
         container.className = 'rack-grid';
         renderGridView(container, totalRacks, isFiltering, matchingSlots, matchingRacks);
@@ -127,9 +143,8 @@ export function renderGridView(container, totalRacks, isFiltering, matchingSlots
         rackEl.style.gridTemplateRows = `repeat(${Math.ceil(sectionsPerRack / 2)}, auto)`;
         const brandsInRack = new Set(Object.values(appState.finalSlottedData).filter(item => item.LocationID?.startsWith(`${rackId}-`)).map(item => item.Brand));
         const brandLabel = Array.from(brandsInRack).join(', ') || 'Empty';
-        rackEl.innerHTML = `<div class="rack-title" data-rack-id="${rackId}">Rack ${rackId}<span class="font-normal text-indigo-300 ml-2">- ${brandLabel}</span></div>`;
-        rackEl.querySelector('.rack-title').addEventListener('click', (e) => { appState.selectedRackId = parseInt(e.currentTarget.dataset.rackId); toggleView(); });
-
+        rackEl.innerHTML = `<div class="rack-title" data-rack-id="${rackId}" data-action="select-rack-title">Rack ${rackId}<span class="font-normal text-indigo-300 ml-2">- ${brandLabel}</span></div>`;
+        
         sectionOrder.forEach(sectionId => {
             const sectionEl = document.createElement('div');
             sectionEl.className = 'grid-section';
@@ -158,6 +173,7 @@ export function renderGridView(container, totalRacks, isFiltering, matchingSlots
         container.appendChild(rackEl);
     }
     if (isFiltering && racksFound === 0) container.innerHTML = `<p class="text-gray-500 text-center col-span-full">No items found matching the current filters.</p>`;
+    else if (!isFiltering && racksFound === 0) container.innerHTML = `<p class="text-gray-500 text-center col-span-full">No items have been slotted for this site yet.</p>`;
 }
 
 export function renderDetailView(container, totalRacks, isFiltering, matchingSlots, matchingRacks) {
@@ -202,11 +218,12 @@ export function renderDetailView(container, totalRacks, isFiltering, matchingSlo
 
         rackButton.style.backgroundColor = bgColor;
         rackButton.dataset.rackId = rackId;
+        rackButton.dataset.action = 'select-rack';
         const mainBrand = brandsInRack[0];
         rackButton.innerHTML = `<div class="rack-label" style="color: ${textColor}">${rackId}</div><div class="brand-label" style="color: ${brandColor}">${mainBrand || (isExcluded ? 'EXCLUDED' : 'Empty')}</div>`;
         
-        if (!isExcluded) {
-            rackButton.addEventListener('click', () => { appState.selectedRackId = rackId; renderUI(); });
+        if (isExcluded) {
+            rackButton.removeAttribute('data-action');
         }
         sidebar.appendChild(rackButton);
     }
@@ -235,9 +252,7 @@ export function renderDetailView(container, totalRacks, isFiltering, matchingSlo
                         slotEl.style.backgroundColor = color;
                         slotEl.innerHTML = `<div class="font-semibold text-xs italic">${item.Model}</div><div class="text-xs">${item.Color}, Sz ${item.Size}</div>`;
                         slotEl.setAttribute('draggable', 'true');
-                        slotEl.addEventListener('dragstart', handleDragStart);
-                        slotEl.addEventListener('dragend', handleDragEnd);
-
+                        
                         const cushionLevel = appState.modelCushionAssignments[item.Model];
                         if (cushionLevel) {
                             const levelIndex = appState.cushionLevels.indexOf(cushionLevel);
@@ -250,10 +265,6 @@ export function renderDetailView(container, totalRacks, isFiltering, matchingSlo
                         slotEl.classList.add('empty');
                         slotEl.innerHTML = `<span class="text-gray-400 text-xs">${locationId}</span>`;
                     }
-
-                    slotEl.addEventListener('dragover', handleDragOver);
-                    slotEl.addEventListener('dragleave', handleDragLeave);
-                    slotEl.addEventListener('drop', handleDrop);
 
                     if (matchingSlots.has(locationId)) slotEl.classList.add('highlight-detail');
                     stackEl.appendChild(slotEl);
@@ -309,7 +320,7 @@ export function renderMetricsPanel(newlySlottedCount) {
     getEl('slots-used').textContent = slotsUsed;
     getEl('slots-available').textContent = totalSlots - slotsUsed;
     getEl('slots-inbound').textContent = Object.values(appState.finalSlottedData).filter(item => item.Type === 'PO').length;
-    if(newlySlottedCount > 0) getEl('items-newly-slotted').textContent = newlySlottedCount;
+    if(newlySlottedCount !== undefined) getEl('items-newly-slotted').textContent = newlySlottedCount;
     const capacityBar = getEl('capacity-bar');
     capacityBar.style.width = `${capacity}%`;
     capacityBar.textContent = `${capacity.toFixed(1)}%`;
@@ -406,12 +417,9 @@ export function renderExclusionList() {
         el.className = 'flex justify-between items-center bg-gray-100 p-2 rounded';
         el.innerHTML = `
             <span>${keyword}</span>
-            <button data-keyword="${keyword}" class="remove-exclusion-btn text-red-500 hover:text-red-700 font-bold">&times;</button>
+            <button data-keyword="${keyword}" data-action="remove-exclusion" class="remove-exclusion-btn text-red-500 hover:text-red-700 font-bold">&times;</button>
         `;
         container.appendChild(el);
-    });
-    document.querySelectorAll('.remove-exclusion-btn').forEach(btn => {
-        btn.addEventListener('click', () => removeExclusionKeyword(btn.dataset.keyword));
     });
 }
 
@@ -443,42 +451,12 @@ export function renderCushionUI() {
         const removeBtn = document.createElement('button');
         removeBtn.className = 'remove-cushion-btn text-red-400 hover:text-red-600';
         removeBtn.innerHTML = '&times;';
+        removeBtn.dataset.action = 'remove-cushion-level';
+        removeBtn.dataset.level = level;
         
         item.appendChild(leftSide);
         item.appendChild(removeBtn);
         list.appendChild(item);
-
-        removeBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            removeCushionLevel(level);
-        });
-
-        item.addEventListener('dragstart', e => {
-            e.target.classList.add('dragging');
-        });
-
-        item.addEventListener('dragend', e => {
-            e.target.classList.remove('dragging');
-        });
-    });
-
-    list.addEventListener('dragover', e => {
-        e.preventDefault();
-        const afterElement = getDragAfterElement(list, e.clientY);
-        const dragging = list.querySelector('.dragging');
-        if (afterElement == null) {
-            list.appendChild(dragging);
-        } else {
-            list.insertBefore(dragging, afterElement);
-        }
-    });
-
-    list.addEventListener('drop', async () => {
-        const newOrder = Array.from(list.querySelectorAll('.cushion-level-item')).map(item => item.dataset.level);
-        appState.cushionLevels = newOrder;
-        await saveCushionData();
-        renderCushionUI();
-        showToast('Cushion priority updated.', 'success');
     });
 
     updateModelAssignmentList();
@@ -504,7 +482,9 @@ export function updateModelAssignmentList() {
         label.textContent = model;
         
         const select = document.createElement('select');
-        select.className = 'border-gray-300 rounded-md shadow-sm w-48';
+        select.className = 'border-gray-300 rounded-md shadow-sm w-48 model-assignment-select';
+        select.dataset.model = model;
+        select.dataset.action = 'assign-cushion';
         select.innerHTML = '<option value="">Unassigned</option>';
         appState.cushionLevels.forEach(level => {
             const option = document.createElement('option');
@@ -514,16 +494,6 @@ export function updateModelAssignmentList() {
                 option.selected = true;
             }
             select.appendChild(option);
-        });
-
-        select.addEventListener('change', (e) => {
-            const selectedLevel = e.target.value;
-            if (selectedLevel) {
-                appState.modelCushionAssignments[model] = selectedLevel;
-            } else {
-                delete appState.modelCushionAssignments[model];
-            }
-            saveCushionData();
         });
 
         el.appendChild(label);
@@ -544,13 +514,9 @@ export function renderSiteManagementModal() {
         el.className = 'flex justify-between items-center p-3 rounded-lg bg-gray-50 border';
         el.innerHTML = `
             <span class="font-semibold">${site.name}</span>
-            <button data-site-id="${site.id}" data-site-name="${site.name}" class="delete-site-btn text-red-500 hover:text-red-700 font-bold text-lg">&times;</button>
+            <button data-site-id="${site.id}" data-site-name="${site.name}" data-action="delete-site" class="delete-site-btn text-red-500 hover:text-red-700 font-bold text-lg">&times;</button>
         `;
         container.appendChild(el);
-    });
-
-    document.querySelectorAll('.delete-site-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => deleteSite(e.target.dataset.siteId, e.target.dataset.siteName));
     });
 }
 
@@ -560,80 +526,73 @@ export function renderUserManagementModal() {
     pendingContainer.innerHTML = '<div class="spinner"></div>';
     activeContainer.innerHTML = '';
 
-    try {
-        const usersCollectionRef = collection(db, 'users');
-        getDocs(usersCollectionRef).then(usersSnapshot => {
-            pendingContainer.innerHTML = '';
-            
-            const pendingUsers = [];
-            const activeUsers = [];
+    const usersCollectionRef = collection(db, 'users');
+    getDocs(usersCollectionRef).then(usersSnapshot => {
+        pendingContainer.innerHTML = '';
+        
+        const pendingUsers = [];
+        const activeUsers = [];
 
-            usersSnapshot.docs.forEach(doc => {
-                const user = { id: doc.id, ...doc.data() };
-                if (user.status === 'pending') {
-                    pendingUsers.push(user);
-                } else if (user.status !== 'denied') {
-                    activeUsers.push(user);
-                }
-            });
-
-            if (pendingUsers.length === 0) {
-                pendingContainer.innerHTML = '<p class="text-gray-500">No new users are awaiting approval.</p>';
-            } else {
-                pendingUsers.forEach(user => {
-                    const userEl = document.createElement('div');
-                    userEl.className = 'flex justify-between items-center p-3 rounded-lg bg-yellow-50 border border-yellow-200';
-                    const requestDate = user.requestTimestamp?.toDate().toLocaleDateString() || 'N/A';
-                    userEl.innerHTML = `
-                        <div>
-                            <p class="font-semibold">${user.email}</p>
-                            <p class="text-xs text-gray-600">Requested: ${requestDate}</p>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <button data-uid="${user.id}" class="approve-user-btn btn btn-primary bg-green-600 hover:bg-green-700 text-xs py-1 px-2">Approve</button>
-                            <button data-uid="${user.id}" class="deny-user-btn btn btn-secondary bg-red-600 hover:bg-red-700 text-white text-xs py-1 px-2">Deny</button>
-                        </div>
-                    `;
-                    pendingContainer.appendChild(userEl);
-                });
+        usersSnapshot.docs.forEach(doc => {
+            const user = { id: doc.id, ...doc.data() };
+            if (user.status === 'pending') {
+                pendingUsers.push(user);
+            } else if (user.status !== 'denied') {
+                activeUsers.push(user);
             }
-
-            if (activeUsers.length === 0) {
-                activeContainer.innerHTML = '<p class="text-gray-500">No other active users found.</p>';
-            } else {
-                activeUsers.forEach(user => {
-                    const userEl = document.createElement('div');
-                    userEl.className = 'flex justify-between items-center p-3 rounded-lg bg-gray-50 border';
-                    
-                    const emailSpan = `<span class="font-semibold">${user.email}</span>`;
-                    const selfLabel = user.id === appState.currentUser.uid ? '<span class="text-xs font-bold text-indigo-600 ml-2">(You)</span>' : '';
-                    
-                    const roleSelect = `
-                        <select data-uid="${user.id}" class="role-select border-gray-300 rounded-md shadow-sm" ${user.id === appState.currentUser.uid ? 'disabled' : ''}>
-                            <option value="salesfloor" ${user.role === 'salesfloor' ? 'selected' : ''}>Salesfloor</option>
-                            <option value="manager" ${user.role === 'manager' ? 'selected' : ''}>Manager</option>
-                        </select>
-                    `;
-                    
-                    const deleteBtn = `<button data-uid="${user.id}" data-email="${user.email}" class="delete-user-btn text-red-500 hover:text-red-700 disabled:opacity-50" ${user.id === appState.currentUser.uid ? 'disabled' : ''}>&times;</button>`;
-                    
-                    userEl.innerHTML = `
-                        <div>${emailSpan} ${selfLabel}</div>
-                        <div class="flex items-center gap-4">${roleSelect} ${deleteBtn}</div>
-                    `;
-                    activeContainer.appendChild(userEl);
-                });
-            }
-
-            document.querySelectorAll('.approve-user-btn').forEach(btn => btn.addEventListener('click', (e) => handleApprovalAction(e.target.dataset.uid, 'approved')));
-            document.querySelectorAll('.deny-user-btn').forEach(btn => btn.addEventListener('click', (e) => handleApprovalAction(e.target.dataset.uid, 'denied')));
-            document.querySelectorAll('.role-select').forEach(select => select.addEventListener('change', (e) => updateUserRole(e.target.dataset.uid, e.target.value)));
-            document.querySelectorAll('.delete-user-btn').forEach(btn => btn.addEventListener('click', (e) => deleteUser(e.target.dataset.uid, e.target.dataset.email)));
         });
-    } catch (error) {
+
+        if (pendingUsers.length === 0) {
+            pendingContainer.innerHTML = '<p class="text-gray-500">No new users are awaiting approval.</p>';
+        } else {
+            pendingUsers.forEach(user => {
+                const userEl = document.createElement('div');
+                userEl.className = 'flex justify-between items-center p-3 rounded-lg bg-yellow-50 border border-yellow-200';
+                const requestDate = user.requestTimestamp?.toDate().toLocaleDateString() || 'N/A';
+                userEl.innerHTML = `
+                    <div>
+                        <p class="font-semibold">${user.email}</p>
+                        <p class="text-xs text-gray-600">Requested: ${requestDate}</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button data-uid="${user.id}" data-action="approve-user" class="btn btn-primary bg-green-600 hover:bg-green-700 text-xs py-1 px-2">Approve</button>
+                        <button data-uid="${user.id}" data-action="deny-user" class="btn btn-secondary bg-red-600 hover:bg-red-700 text-white text-xs py-1 px-2">Deny</button>
+                    </div>
+                `;
+                pendingContainer.appendChild(userEl);
+            });
+        }
+
+        if (activeUsers.length === 0) {
+            activeContainer.innerHTML = '<p class="text-gray-500">No other active users found.</p>';
+        } else {
+            activeUsers.forEach(user => {
+                const userEl = document.createElement('div');
+                userEl.className = 'flex justify-between items-center p-3 rounded-lg bg-gray-50 border';
+                
+                const emailSpan = `<span class="font-semibold">${user.email}</span>`;
+                const selfLabel = user.id === appState.currentUser.uid ? '<span class="text-xs font-bold text-indigo-600 ml-2">(You)</span>' : '';
+                
+                const roleSelect = `
+                    <select data-uid="${user.id}" data-action="update-role" class="role-select border-gray-300 rounded-md shadow-sm" ${user.id === appState.currentUser.uid ? 'disabled' : ''}>
+                        <option value="salesfloor" ${user.role === 'salesfloor' ? 'selected' : ''}>Salesfloor</option>
+                        <option value="manager" ${user.role === 'manager' ? 'selected' : ''}>Manager</option>
+                    </select>
+                `;
+                
+                const deleteBtn = `<button data-uid="${user.id}" data-email="${user.email}" data-action="delete-user" class="delete-user-btn text-red-500 hover:text-red-700 disabled:opacity-50" ${user.id === appState.currentUser.uid ? 'disabled' : ''}>&times;</button>`;
+                
+                userEl.innerHTML = `
+                    <div>${emailSpan} ${selfLabel}</div>
+                    <div class="flex items-center gap-4">${roleSelect} ${deleteBtn}</div>
+                `;
+                activeContainer.appendChild(userEl);
+            });
+        }
+    }).catch(error => {
         console.error("Error fetching users:", error);
         pendingContainer.innerHTML = '<p class="text-red-500">Could not load user list.</p>';
-    }
+    });
 }
 
 export function adjustUiForRole(role) {
@@ -649,6 +608,199 @@ export function adjustUiForRole(role) {
 export function updateUiForSiteSelection() {
     const hasSite = !!appState.selectedSiteId;
     document.querySelectorAll('.file-input-btn, #slotBtn').forEach(el => {
-        el.disabled = !hasSite;
+        if (el.disabled !== undefined) {
+            el.disabled = !hasSite;
+        }
     });
+    checkFiles();
+}
+
+function getCushionIndicatorColor(levelIndex) {
+    const baseColor = appState.cushionIndicatorColor;
+    const totalLevels = appState.cushionLevels.length;
+    
+    if (totalLevels === 0 || levelIndex === -1) {
+        return 'transparent';
+    }
+
+    const opacity = 1.0 - (levelIndex / (totalLevels -1 || 1)) * 0.9;
+
+    let r = 0, g = 0, b = 0;
+    if (baseColor.length === 7) {
+        r = parseInt(baseColor.substring(1, 3), 16);
+        g = parseInt(baseColor.substring(3, 5), 16);
+        b = parseInt(baseColor.substring(5, 7), 16);
+    }
+    
+    return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+}
+
+export function renderSiteSelector() {
+    const selector = getEl('site-selector');
+    selector.innerHTML = '';
+    appState.sites.forEach(site => {
+        const option = document.createElement('option');
+        option.value = site.id;
+        option.textContent = site.name;
+        selector.appendChild(option);
+    });
+}
+
+export function updateFilterDropdowns() {
+    const brandFilter = getEl('brand-filter');
+    const modelFilter = getEl('model-filter');
+    const colorFilter = getEl('color-filter');
+    const sizeFilter = getEl('size-filter');
+
+    const selectedBrand = brandFilter.value;
+    const selectedModel = modelFilter.value;
+    const selectedColor = colorFilter.value;
+
+    // Preserve current selections
+    const lastSelected = {
+        brand: selectedBrand,
+        model: selectedModel,
+        color: selectedColor,
+        size: sizeFilter.value
+    };
+
+    // Filter available items based on selections so far
+    let availableItems = Object.values(appState.finalSlottedData);
+    if (selectedBrand) availableItems = availableItems.filter(item => item.Brand === selectedBrand);
+    if (selectedModel) availableItems = availableItems.filter(item => item.Model === selectedModel);
+    if (selectedColor) availableItems = availableItems.filter(item => item.Color === selectedColor);
+
+    // Populate Brands
+    populateDropdown(brandFilter, 'All Brands', [...new Set(Object.values(appState.finalSlottedData).map(item => item.Brand))].sort(), lastSelected.brand);
+
+    // Populate Models (based on selected brand)
+    let availableModels = [...new Set(Object.values(appState.finalSlottedData).filter(item => !selectedBrand || item.Brand === selectedBrand).map(item => item.Model))].sort();
+    populateDropdown(modelFilter, 'All Models', availableModels, lastSelected.model);
+    modelFilter.disabled = !selectedBrand;
+
+    // Populate Colors (based on brand and model)
+    let availableColors = [...new Set(Object.values(appState.finalSlottedData).filter(item => (!selectedBrand || item.Brand === selectedBrand) && (!selectedModel || item.Model === selectedModel)).map(item => item.Color))].sort();
+    populateDropdown(colorFilter, 'All Colors', availableColors, lastSelected.color);
+    colorFilter.disabled = !selectedModel;
+
+    // Populate Sizes (based on brand, model, and color)
+    let availableSizes = [...new Set(availableItems.map(item => item.Size))].sort((a, b) => parseFloat(a) - parseFloat(b));
+    populateDropdown(sizeFilter, 'All Sizes', availableSizes, lastSelected.size);
+    sizeFilter.disabled = !selectedColor;
+}
+
+function populateDropdown(selectElement, defaultOptionText, options, selectedValue) {
+    selectElement.innerHTML = `<option value="">${defaultOptionText}</option>`;
+    options.forEach(optionValue => {
+        if(optionValue) {
+            const option = document.createElement('option');
+            option.value = optionValue;
+            option.textContent = optionValue;
+            if (optionValue === selectedValue) {
+                option.selected = true;
+            }
+            selectElement.appendChild(option);
+        }
+    });
+}
+
+export function checkFiles() {
+    const inventoryFiles = appState.rawInventoryFiles;
+    const poFiles = appState.rawPOFiles;
+    const slotBtn = getEl('slotBtn');
+
+    if (appState.selectedSiteId && (inventoryFiles.length > 0 || poFiles.length > 0)) {
+        slotBtn.disabled = false;
+        getEl('downloadPdfBtn').disabled = false;
+        getEl('downloadCsvBtn').disabled = false;
+        getEl('viewToggleBtn').disabled = false;
+    } else {
+        slotBtn.disabled = true;
+        getEl('downloadPdfBtn').disabled = true;
+        getEl('downloadCsvBtn').disabled = true;
+        getEl('viewToggleBtn').disabled = true;
+    }
+}
+
+export function renderPODetails() {
+    const container = getEl('po-list-container');
+    const summary = getEl('po-summary');
+    container.innerHTML = '';
+
+    const allPOs = Object.entries(appState.loadedPOs);
+
+    if (allPOs.length === 0) {
+        summary.textContent = '';
+        container.innerHTML = '<p class="text-gray-500">No POs loaded or all have been fully received.</p>';
+        return;
+    }
+
+    let totalItems = 0;
+    let totalValue = 0; // Assuming value could be added later
+
+    allPOs.forEach(([, po]) => {
+        totalItems += po.itemCount;
+    });
+
+    summary.textContent = `Displaying ${allPOs.length} PO(s) with a total of ${totalItems} unreceived items.`;
+
+    allPOs.forEach(([key, po]) => {
+        const el = document.createElement('div');
+        el.className = 'p-3 rounded-lg bg-gray-50 border flex justify-between items-center';
+        el.innerHTML = `
+            <div>
+                <p class="font-semibold text-indigo-700">${po.brand} - <span class="font-normal text-gray-600">${key}</span></p>
+                <p class="text-sm text-gray-500">${po.itemCount} items | Loaded: ${po.loadedDate}</p>
+            </div>
+            <button data-po-key="${key}" data-action="receive-po" class="btn btn-primary text-sm py-1 px-3">Mark as Received</button>
+        `;
+        container.appendChild(el);
+    });
+}
+
+export function renderUnslottedReport() {
+    const container = getEl('unslotted-list-container');
+    const badge = getEl('unslotted-badge');
+    const downloadBtn = getEl('downloadUnslottedBtn');
+    container.innerHTML = '';
+
+    if (appState.unslottedItems.length === 0) {
+        badge.classList.add('hidden');
+        downloadBtn.disabled = true;
+        container.innerHTML = '<p class="text-gray-500">Run the slotting process to see unslotted items.</p>';
+        return;
+    }
+
+    badge.textContent = appState.unslottedItems.length;
+    badge.classList.remove('hidden');
+    downloadBtn.disabled = false;
+
+    const itemsByBrand = appState.unslottedItems.reduce((acc, item) => {
+        if (!acc[item.Brand]) {
+            acc[item.Brand] = [];
+        }
+        acc[item.Brand].push(item);
+        return acc;
+    }, {});
+
+    Object.entries(itemsByBrand).forEach(([brand, items]) => {
+        const brandHeader = document.createElement('h3');
+        brandHeader.className = 'text-md font-semibold text-gray-700 mt-4 -mb-2';
+        brandHeader.textContent = brand;
+        container.appendChild(brandHeader);
+
+        items.forEach(item => {
+            const el = document.createElement('div');
+            el.className = 'p-2 rounded-md bg-red-50 border border-red-100';
+            el.innerHTML = `<p class="font-medium text-red-800">${item.Model} - ${item.Color} - ${item.Size}</p>
+                            <p class="text-xs text-red-600">${item.OriginalItemString}</p>`;
+            container.appendChild(el);
+        });
+    });
+}
+
+export function toggleView() {
+    appState.currentView = appState.currentView === 'grid' ? 'detail' : 'grid';
+    getEl('viewToggleBtn').textContent = appState.currentView === 'grid' ? 'Detail View' : 'Grid View';
+    renderUI();
 }

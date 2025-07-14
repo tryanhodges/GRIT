@@ -4,7 +4,8 @@
  */
 
 import { appState } from './state.js';
-import { robustCSVParse, createHeaderMap, toTitleCase } from './utils.js';
+import { robustCSVParse, createHeaderMap, toTitleCase, readFileAsText } from './utils.js';
+import { showToast } from './ui.js';
 
 /**
  * Parses an item string to extract its properties. Includes special logic for the BROOKS brand.
@@ -64,19 +65,16 @@ export function parseItemString(itemString, brand = '') {
 
 /**
  * Parses uploaded PO files to determine unreceived items.
- * @param {FileList} fileList The list of files to parse.
+ * @param {FileList|Array<File>} fileList The list of files to parse.
  */
 export async function parsePOFiles(fileList) {
+    if (!fileList || fileList.length === 0) return;
+
     const includeKids = document.getElementById('includeKids').checked;
-    let newPOsLoaded = false;
+    
     for (const file of fileList) {
-        newPOsLoaded = true;
         const brand = toTitleCase(file.name.replace(/\s*\d*\.csv$/i, '').trim());
-        const csvText = await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target.result);
-            reader.readAsText(file);
-        });
+        const csvText = await readFileAsText(file);
         const lines = robustCSVParse(csvText);
         if (lines.length < 2) continue;
 
@@ -86,7 +84,7 @@ export async function parsePOFiles(fileList) {
         const checkedInIndex = headerMap.get('checked in');
 
         if (itemIndex === undefined || qtyIndex === undefined || checkedInIndex === undefined) {
-            showToast(`Skipping ${file.name}: Missing 'Item', 'Quantity', or 'Checked In' column.`, 'error');
+            showToast(`Skipping ${file.name}: Missing 'Item', 'Quantity', or 'Checked In' column.`, "error");
             continue;
         }
 
@@ -94,7 +92,7 @@ export async function parsePOFiles(fileList) {
         for (let i = 1; i < lines.length; i++) {
             const cols = lines[i];
             const itemString = cols[itemIndex];
-            if (appState.exclusionKeywords.some(kw => itemString.toLowerCase().includes(kw.toLowerCase()))) {
+            if (!itemString || appState.exclusionKeywords.some(kw => itemString.toLowerCase().includes(kw.toLowerCase()))) {
                 continue;
             }
             
@@ -102,7 +100,7 @@ export async function parsePOFiles(fileList) {
             const checkedIn = parseInt(cols[checkedInIndex], 10) || 0;
             const unreceivedQty = quantity - checkedIn;
 
-            if (itemString && unreceivedQty > 0) {
+            if (unreceivedQty > 0) {
                 const { Model, Color, Size, Sex } = parseItemString(itemString, brand);
                  if (!includeKids && (Sex === 'Y' || Sex === 'K')) {
                     continue;
@@ -118,8 +116,8 @@ export async function parsePOFiles(fileList) {
             }
         }
 
+        const poKey = file.name;
         if (poItems.length > 0) {
-            const poKey = file.name;
             appState.loadedPOs[poKey] = {
                 brand,
                 itemCount: poItems.length,
@@ -127,18 +125,10 @@ export async function parsePOFiles(fileList) {
                 status: 'unreceived',
                 items: poItems
             };
-            const fileNamesContainer = document.getElementById('poFileNames');
-            const fileDiv = Array.from(fileNamesContainer.children).find(el => el.textContent.includes(file.name));
-            if (fileDiv) {
-                fileDiv.innerHTML = `${file.name} <span class="text-gray-400">- ${poItems.length} items</span>`;
-            }
         } else {
-            delete appState.loadedPOs[file.name];
+            // If a file is re-uploaded and now has 0 items, remove it
+            delete appState.loadedPOs[poKey];
         }
-    }
-    if(newPOsLoaded) {
-        // This function is in ui.js, so we need to call it from there or pass it in.
-        // For now, we'll rely on the calling function to re-render.
     }
 }
 
@@ -160,25 +150,28 @@ export function runLocalSlottingAlgorithm(data) {
     // 1. Process Previous Slotting Data
     let existingBackroom = {};
     if (previousSlottingData) {
-        const lines = previousSlottingData.split('\n').map(l => l.split(','));
-        const header = lines[0].map(h => h.replace(/"/g, '').toLowerCase());
-        const locIndex = header.indexOf('locationid');
-        const itemStringIndex = header.indexOf('originalitemstring');
-        const brandIndex = header.indexOf('brand');
-        const typeIndex = header.indexOf('type');
+        const lines = robustCSVParse(previousSlottingData);
+        if (lines.length > 1) {
+            const headerMap = createHeaderMap(lines[0]);
+            const locIndex = headerMap.get('locationid');
+            const itemStringIndex = headerMap.get('originalitemstring');
+            const brandIndex = headerMap.get('brand');
+            const typeIndex = headerMap.get('type');
 
-        for (let i = 1; i < lines.length; i++) {
-            const cols = lines[i].map(c => c.replace(/"/g, ''));
-            if (cols.length < locIndex + 1) continue;
-            const locationId = cols[locIndex];
-            if (!locationId) continue;
-            const originalString = cols[itemStringIndex];
-            const { Model, Color, Size, Sex } = parseItemString(originalString);
-            existingBackroom[locationId] = {
-                UniqueID: `${cols[brandIndex]}-${Model}-${Color}-${Size}-${i}`,
-                Brand: cols[brandIndex], Model, Color, Size, Sex,
-                Type: cols[typeIndex], OriginalItemString: originalString
-            };
+            if (locIndex !== undefined && itemStringIndex !== undefined && brandIndex !== undefined && typeIndex !== undefined) {
+                for (let i = 1; i < lines.length; i++) {
+                    const cols = lines[i];
+                    const locationId = cols[locIndex];
+                    if (!locationId) continue;
+                    const originalString = cols[itemStringIndex];
+                    const { Model, Color, Size, Sex } = parseItemString(originalString, cols[brandIndex]);
+                    existingBackroom[locationId] = {
+                        UniqueID: `${cols[brandIndex]}-${Model}-${Color}-${Size}-${i}`,
+                        Brand: cols[brandIndex], Model, Color, Size, Sex,
+                        Type: cols[typeIndex], OriginalItemString: originalString
+                    };
+                }
+            }
         }
     }
 
@@ -186,18 +179,21 @@ export function runLocalSlottingAlgorithm(data) {
     let allInventoryItems = [];
     inventoryData.forEach(invFile => {
         const brand = invFile.brand;
-        const lines = invFile.content.split('\n').map(l => l.split(','));
-        const header = lines[0].map(h => h.replace(/"/g, '').toLowerCase());
-        const itemIndex = header.indexOf('item');
-        const remainingIndex = header.indexOf('remaining');
+        const lines = robustCSVParse(invFile.content);
+        if (lines.length < 2) return;
+
+        const headerMap = createHeaderMap(lines[0]);
+        const itemIndex = headerMap.get('item');
+        const remainingIndex = headerMap.get('remaining');
+        if (itemIndex === undefined || remainingIndex === undefined) return;
 
         for (let i = 1; i < lines.length; i++) {
-            const cols = lines[i].map(c => c.replace(/"/g, ''));
-            if (cols.length < Math.max(itemIndex, remainingIndex) + 1) continue;
+            const cols = lines[i];
             const itemString = cols[itemIndex];
-            if (exclusionKeywords.some(kw => itemString.toLowerCase().includes(kw.toLowerCase()))) continue;
+            if (!itemString || exclusionKeywords.some(kw => itemString.toLowerCase().includes(kw.toLowerCase()))) continue;
+            
             const remaining = parseInt(cols[remainingIndex], 10);
-            if (itemString && !isNaN(remaining) && remaining > 0) {
+            if (!isNaN(remaining) && remaining > 0) {
                 const { Model, Color, Size, Sex } = parseItemString(itemString, brand);
                 if (!settings.includeKids && (Sex === 'Y' || Sex === 'K')) continue;
                 for (let j = 0; j < remaining; j++) {
@@ -230,13 +226,13 @@ export function runLocalSlottingAlgorithm(data) {
         for (let i = 1; i < lines.length; i++) {
             const cols = lines[i];
             const itemString = cols[itemIndex];
-            if (exclusionKeywords.some(kw => itemString.toLowerCase().includes(kw.toLowerCase()))) continue;
+            if (!itemString || exclusionKeywords.some(kw => itemString.toLowerCase().includes(kw.toLowerCase()))) continue;
             
             const quantity = parseInt(cols[qtyIndex], 10) || 0;
             const checkedIn = parseInt(cols[checkedInIndex], 10) || 0;
             const unreceivedQty = quantity - checkedIn;
 
-            if (itemString && unreceivedQty > 0) {
+            if (unreceivedQty > 0) {
                 const { Model, Color, Size, Sex } = parseItemString(itemString, brand);
                 if (!settings.includeKids && (Sex === 'Y' || Sex === 'K')) continue;
                 for (let j = 0; j < unreceivedQty; j++) {
@@ -382,6 +378,6 @@ export function runLocalSlottingAlgorithm(data) {
     return {
         finalSlottedData: backroom,
         unslottedItems: unslottedItems,
-        newlySlottedCount: itemsToSlot.length
+        newlySlottedCount: itemsToSlot.length - unslottedItems.length
     };
 }

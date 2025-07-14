@@ -10,7 +10,7 @@ import { auth, db } from './firebase.js';
 import { appState } from './state.js';
 import { loadDataFromFirestore, saveDataToFirestore } from './api.js';
 import { showToast, setLoading, adjustUiForRole } from './ui.js';
-import { initializeAppForUser } from './main.js';
+// REMOVED: import { initializeAppForUser } from './main.js';
 import { getEl } from './utils.js';
 
 /**
@@ -160,7 +160,8 @@ export function initializeAuthListener() {
             
             adjustUiForRole(appState.currentUser.role);
             
-            await initializeAppForUser();
+            // MODIFIED: Dispatch event instead of calling main.js function directly.
+            document.dispatchEvent(new CustomEvent('user-authenticated'));
 
         } else {
             // User is signed out.

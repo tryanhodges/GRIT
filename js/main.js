@@ -7,8 +7,8 @@
 
 // State and Firebase
 import { appState } from './state.js';
-import { db, auth } from './firebase.js';
-import { serverTimestamp, collection, writeBatch } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
+import { db } from './firebase.js';
+import { serverTimestamp, collection, writeBatch, doc, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
 
 // API and Logic
 import { saveDataToFirestore, loadDataFromFirestore, deleteDocument, clearCollection } from './api.js';
@@ -21,8 +21,8 @@ import {
     showToast, setLoading, showConfirmationModal,
     renderUI, renderPODetails, renderUnslottedReport, renderExclusionList, renderCushionUI,
     renderSiteManagementModal, renderUserManagementModal, renderMetricsPanel, updateModelAssignmentList,
-    adjustUiForRole, updateUiForSiteSelection,
-    checkFiles, toggleView, updateFilterDropdowns,
+    adjustUiForRole, updateUiForSiteSelection, renderSiteSelector, updateFilterDropdowns, checkFiles,
+    toggleView
 } from './ui.js';
 
 // --- Initialization ---
@@ -39,11 +39,15 @@ function initializeEventListeners() {
     getEl('signup-btn').addEventListener('click', handleSignUp);
     getEl('logout-btn').addEventListener('click', handleSignOut);
 
+    // MODIFIED: Listen for custom event to initialize the app
+    document.addEventListener('user-authenticated', initializeAppForUser);
+
     // File Inputs
     getEl('prevSlottingFile').addEventListener('change', (e) => handleFileChange(e, 'prevSlottingFileName'));
-    getEl('inventoryFile').addEventListener('change', (e) => handleMultiFileChange(e, 'inventoryFileNames', 'clearInventoryBtn'));
+    getEl('inventoryFile').addEventListener('change', (e) => handleMultiFileChange(e, 'inventoryFileNames', 'clearInventoryBtn', 'inventory'));
     getEl('poFile').addEventListener('change', (e) => {
-        handleMultiFileChange(e, 'poFileNames', 'clearPOsBtn');
+        handleMultiFileChange(e, 'poFileNames', 'clearPOsBtn', 'po');
+        // We still parse here to give the user immediate feedback in the UI
         parsePOFiles(e.target.files).then(() => renderPODetails());
     });
     getEl('cushionModelFile').addEventListener('change', handleCushionModelUpload);
@@ -58,13 +62,17 @@ function initializeEventListeners() {
     });
     getEl('downloadUnslottedBtn').addEventListener('click', downloadUnslottedCSV);
 
-    // Search and Filters
-    getEl('search-btn').addEventListener('click', executeSearch);
+    // MODIFIED: Search and Filters now just trigger a re-render
+    getEl('search-btn').addEventListener('click', renderUI);
     getEl('clearFiltersBtn').addEventListener('click', clearFilters);
     getEl('brand-filter').addEventListener('change', () => { updateFilterDropdowns(); renderUI(); });
     getEl('model-filter').addEventListener('change', () => { updateFilterDropdowns(); renderUI(); });
     getEl('color-filter').addEventListener('change', () => { updateFilterDropdowns(); renderUI(); });
     getEl('size-filter').addEventListener('change', () => { renderUI(); });
+    getEl('searchInput').addEventListener('keyup', (e) => {
+        if (e.key === 'Enter') renderUI();
+    });
+
 
     // Clear Buttons
     getEl('clearInventoryBtn').addEventListener('click', clearLoadedInventory);
@@ -130,15 +138,88 @@ function initializeEventListeners() {
             });
         });
     });
+
+    // Event Delegation for dynamic elements
+    document.body.addEventListener('click', (e) => {
+        const target = e.target;
+        const action = target.dataset.action || target.closest('[data-action]')?.dataset.action;
+
+        switch(action) {
+            case 'delete-site':
+                deleteSite(target.dataset.siteId, target.dataset.siteName);
+                break;
+            case 'receive-po':
+                if (appState.currentUser.role === 'manager') {
+                    markPOAsReceived(target.dataset.poKey);
+                } else {
+                    showToast("You do not have permission to receive POs.", "error");
+                }
+                break;
+            case 'remove-exclusion':
+                removeExclusionKeyword(target.dataset.keyword);
+                break;
+            case 'select-rack-title':
+                appState.selectedRackId = parseInt(target.dataset.rackId);
+                toggleView();
+                break;
+            case 'select-rack':
+                appState.selectedRackId = parseInt(target.closest('[data-action="select-rack"]').dataset.rackId);
+                renderUI();
+                break;
+            case 'approve-user':
+                handleApprovalAction(target.dataset.uid, 'approved');
+                break;
+            case 'deny-user':
+                handleApprovalAction(target.dataset.uid, 'denied');
+                break;
+            case 'delete-user':
+                deleteUser(target.dataset.uid, target.dataset.email);
+                break;
+            case 'remove-cushion-level':
+                removeCushionLevel(target.dataset.level);
+                break;
+        }
+    });
+    
+    document.body.addEventListener('change', (e) => {
+        const target = e.target;
+        const action = target.dataset.action;
+
+        switch(action) {
+            case 'update-role':
+                updateUserRole(target.dataset.uid, target.value);
+                break;
+            case 'assign-cushion':
+                const model = target.dataset.model;
+                const selectedLevel = target.value;
+                if (selectedLevel) {
+                    appState.modelCushionAssignments[model] = selectedLevel;
+                } else {
+                    delete appState.modelCushionAssignments[model];
+                }
+                saveCushionData();
+                break;
+        }
+    });
+
+    document.body.addEventListener('dragstart', handleDragStart);
+    document.body.addEventListener('dragend', handleDragEnd);
+    document.body.addEventListener('dragover', handleDragOver);
+    document.body.addEventListener('dragleave', handleDragLeave);
+    document.body.addEventListener('drop', handleDrop);
 }
 
 function initializeModal(modalId, openBtnId, closeBtnId, onOpen) {
     const modal = getEl(modalId);
-    getEl(openBtnId).addEventListener('click', () => {
+    const openBtn = getEl(openBtnId);
+    const closeBtn = getEl(closeBtnId);
+    if (!modal || !openBtn || !closeBtn) return;
+
+    openBtn.addEventListener('click', () => {
         if (onOpen) onOpen();
         modal.classList.add('visible');
     });
-    getEl(closeBtnId).addEventListener('click', () => modal.classList.remove('visible'));
+    closeBtn.addEventListener('click', () => modal.classList.remove('visible'));
     modal.addEventListener('click', (e) => {
         if (e.target === modal) {
             modal.classList.remove('visible');
@@ -148,13 +229,13 @@ function initializeModal(modalId, openBtnId, closeBtnId, onOpen) {
 
 // --- App Initialization ---
 
-export async function initializeAppForUser() {
+async function initializeAppForUser() {
     setLoading(true, "Loading sites...");
     await loadSites();
-    const siteSelector = getEl('site-selector');
     if (appState.sites.length > 0) {
+        renderSiteSelector();
         const siteToSelect = appState.currentUser.homeSiteId || appState.sites[0].id;
-        siteSelector.value = siteToSelect;
+        getEl('site-selector').value = siteToSelect;
         appState.selectedSiteId = siteToSelect;
         await initializeFromStorage();
     } else {
@@ -164,27 +245,24 @@ export async function initializeAppForUser() {
     setLoading(false);
 }
 
-export async function initializeFromStorage() {
+async function initializeFromStorage() {
     if (!appState.selectedSiteId) {
         console.error("No site selected, cannot load data.");
         getEl('overviewSubtitle').textContent = 'Please select a site to begin.';
         updateUiForSiteSelection();
         return;
     }
-    setLoading(true, `Loading data for ${appState.selectedSiteId}...`);
+    setLoading(true, `Loading data for ${getEl('site-selector').options[getEl('site-selector').selectedIndex].text}...`);
     
+    // Reset state for the new site
     appState.finalSlottedData = {};
     appState.unslottedItems = [];
     appState.exclusionKeywords = [];
     
+    // Define default settings
     const defaultSettings = {
-        rackCount: 26,
-        sectionsPerRack: 8,
-        stacksPerSection: 5,
-        slotsPerStack: 5,
-        excludeRacks: '',
-        includeKids: false,
-        userInitials: '',
+        rackCount: 26, sectionsPerRack: 8, stacksPerSection: 5, slotsPerStack: 5,
+        excludeRacks: '', includeKids: false, userInitials: '',
         colorMap: {
             'M': { name: 'Men', onHand: '#5468C1', po: '#a9b3e0' },
             'W': { name: 'Women', onHand: '#f846f0', po: '#fbc2f8' },
@@ -194,60 +272,53 @@ export async function initializeFromStorage() {
         cushionIndicatorColor: '#6b7280'
     };
 
-    const settingsPath = `sites/${appState.selectedSiteId}/configs/mainSettings`;
-    const storedSettings = await loadDataFromFirestore(settingsPath);
-    const finalSettings = { ...defaultSettings, ...storedSettings };
+    // Load site-specific and global data in parallel
+    const [storedSettings, slottingData, cushionData, poSnapshot, exclusionData] = await Promise.all([
+        loadDataFromFirestore(`sites/${appState.selectedSiteId}/configs/mainSettings`),
+        loadDataFromFirestore(`sites/${appState.selectedSiteId}/slotting/current`),
+        loadDataFromFirestore('configs/cushionData'),
+        getDocs(collection(db, `sites/${appState.selectedSiteId}/purchaseOrders`)),
+        loadDataFromFirestore(`sites/${appState.selectedSiteId}/configs/exclusionKeywords`)
+    ]);
 
-    getEl('rackCount').value = finalSettings.rackCount;
-    getEl('sectionsPerRack').value = finalSettings.sectionsPerRack;
-    getEl('stacksPerSection').value = finalSettings.stacksPerSection;
-    getEl('slotsPerStack').value = finalSettings.slotsPerStack;
-    getEl('excludeRacks').value = finalSettings.excludeRacks;
-    getEl('includeKids').checked = finalSettings.includeKids;
-    getEl('userInitials').value = finalSettings.userInitials;
-    getEl('colorMen').value = finalSettings.colorMap.M.onHand;
-    getEl('colorMenPO').value = finalSettings.colorMap.M.po;
-    getEl('colorWomen').value = finalSettings.colorMap.W.onHand;
-    getEl('colorWomenPO').value = finalSettings.colorMap.W.po;
-    getEl('colorKids').value = finalSettings.colorMap.K.onHand;
-    getEl('colorKidsPO').value = finalSettings.colorMap.K.po;
+    // Apply settings
+    const finalSettings = { ...defaultSettings, ...storedSettings };
+    Object.keys(finalSettings).forEach(key => {
+        const el = getEl(key);
+        if (el) {
+            if (el.type === 'checkbox') el.checked = finalSettings[key];
+            else el.value = finalSettings[key];
+        }
+    });
+    // Apply color settings
+    Object.keys(finalSettings.colorMap).forEach(key => {
+        const onHandEl = getEl(`color${toTitleCase(finalSettings.colorMap[key].name)}`);
+        const poEl = getEl(`color${toTitleCase(finalSettings.colorMap[key].name)}PO`);
+        if (onHandEl) onHandEl.value = finalSettings.colorMap[key].onHand;
+        if (poEl) poEl.value = finalSettings.colorMap[key].po;
+    });
     getEl('colorCushion').value = finalSettings.cushionIndicatorColor;
 
+    // Update app state from loaded data
     appState.userInitials = finalSettings.userInitials;
     appState.colorMap = finalSettings.colorMap;
     appState.cushionIndicatorColor = finalSettings.cushionIndicatorColor;
-
-    const slottingData = await loadDataFromFirestore(`sites/${appState.selectedSiteId}/slotting/current`);
-    if (slottingData) {
-        appState.finalSlottedData = slottingData.data || {};
-        appState.unslottedItems = slottingData.unslotted || [];
-    }
-
-    const cushionData = await loadDataFromFirestore('configs/cushionData');
-    if(cushionData) {
-        appState.cushionLevels = cushionData.levels || [];
-        appState.modelCushionAssignments = cushionData.assignments || {};
-        appState.allKnownModels = cushionData.models || [];
-    }
-
-    const poCollectionRef = collection(db, `sites/${appState.selectedSiteId}/purchaseOrders`);
-    const poSnapshot = await getDocs(poCollectionRef);
+    appState.finalSlottedData = slottingData?.data || {};
+    appState.unslottedItems = slottingData?.unslotted || [];
+    appState.cushionLevels = cushionData?.levels || [];
+    appState.modelCushionAssignments = cushionData?.assignments || {};
+    appState.allKnownModels = cushionData?.models || [];
     appState.loadedPOs = {};
-    poSnapshot.forEach(doc => {
-        appState.loadedPOs[doc.id] = doc.data();
-    });
-    renderPODetails();
-
-    const exclusionData = await loadDataFromFirestore(`sites/${appState.selectedSiteId}/configs/exclusionKeywords`);
-    if (exclusionData) {
-        appState.exclusionKeywords = exclusionData.keywords || [];
-    }
+    poSnapshot.forEach(doc => { appState.loadedPOs[doc.id] = doc.data(); });
+    appState.exclusionKeywords = exclusionData?.keywords || [];
     
+    // Render all UI components with the new state
     renderExclusionList();
     renderCushionUI();
     renderUI();
     renderMetricsPanel();
     renderUnslottedReport();
+    renderPODetails();
     updateFilterDropdowns();
     updateUiForSiteSelection();
     setLoading(false);
@@ -257,16 +328,24 @@ export async function initializeFromStorage() {
 
 function handleFileChange(event, nameElementId) {
     const file = event.target.files[0];
-    getEl(nameElementId).textContent = file?.name || 'No file chosen...';
-    if (file) {
-        getEl(nameElementId).innerHTML += `<span class="text-gray-400 ml-2">(${ (file.size / 1024).toFixed(2) } KB)</span>`;
+    const nameEl = getEl(nameElementId);
+    if (nameEl) {
+        nameEl.textContent = file?.name || 'No file chosen...';
+        if (file) {
+            nameEl.innerHTML += `<span class="text-gray-400 ml-2">(${ (file.size / 1024).toFixed(2) } KB)</span>`;
+        }
     }
     checkFiles();
 }
 
-function handleMultiFileChange(event, nameContainerId, clearButtonId) {
+function handleMultiFileChange(event, nameContainerId, clearButtonId, type) {
     const files = event.target.files;
     const fileNamesContainer = getEl(nameContainerId);
+
+    // MODIFIED: Store raw files in state
+    if (type === 'inventory') appState.rawInventoryFiles = Array.from(files);
+    if (type === 'po') appState.rawPOFiles = Array.from(files);
+
     if (files.length > 0) {
         fileNamesContainer.innerHTML = Array.from(files).map(f => `<div class="truncate" title="${f.name}">${f.name}</div>`).join('');
         getEl(clearButtonId).classList.remove('hidden');
@@ -279,6 +358,7 @@ function handleMultiFileChange(event, nameContainerId, clearButtonId) {
 
 function clearLoadedInventory() {
     getEl('inventoryFile').value = '';
+    appState.rawInventoryFiles = []; // Clear state
     getEl('inventoryFileNames').textContent = 'No files chosen...';
     getEl('clearInventoryBtn').classList.add('hidden');
     checkFiles();
@@ -287,6 +367,7 @@ function clearLoadedInventory() {
 
 function clearLoadedPOs() {
     getEl('poFile').value = '';
+    appState.rawPOFiles = []; // Clear state
     getEl('poFileNames').textContent = 'No files chosen...';
     getEl('clearPOsBtn').classList.add('hidden');
     checkFiles();
@@ -306,8 +387,9 @@ async function runSlottingProcess() {
     setLoading(true, 'Preparing data for processing...');
 
     try {
-        const inventoryFiles = getEl('inventoryFile').files;
-        const poFiles = getEl('poFile').files;
+        // MODIFIED: Use files from state instead of reading from DOM
+        const inventoryFiles = appState.rawInventoryFiles;
+        const poFiles = appState.rawPOFiles;
         const prevSlottingFile = getEl('prevSlottingFile').files[0];
 
         const readFilePromises = [];
@@ -420,44 +502,7 @@ function downloadUnslottedCSV() {
     downloadFile(csv, 'unslotted_items.csv');
 }
 
-async function executeSearch() {
-    const searchTerm = getEl('searchInput').value.toLowerCase().trim();
-    if (!appState.selectedSiteId) {
-        showToast("Please select a site to search.", "error");
-        return;
-    }
-
-    if (!searchTerm) {
-        await initializeFromStorage();
-        return;
-    }
-
-    setLoading(true, `Searching site ${appState.selectedSiteId} for "${searchTerm}"...`);
-    try {
-        const slottingData = await loadDataFromFirestore(`sites/${appState.selectedSiteId}/slotting/current`);
-        let searchResults = {};
-
-        if (slottingData && slottingData.data) {
-            for (const loc in slottingData.data) {
-                const item = slottingData.data[loc];
-                const itemText = `${item.Brand} ${item.Model} ${item.Color} ${item.Size}`.toLowerCase();
-                if (itemText.includes(searchTerm)) {
-                    searchResults[loc] = item;
-                }
-            }
-        }
-        
-        appState.finalSlottedData = searchResults;
-        renderUI();
-        showToast(`${Object.keys(searchResults).length} items found in this site.`);
-    } catch (error) {
-        console.error("Error during site search:", error);
-        showToast("An error occurred during search.", "error");
-    } finally {
-        setLoading(false);
-    }
-}
-
+// MODIFIED: Clear filters now just resets inputs and re-renders
 function clearFilters() {
     getEl('brand-filter').value = '';
     getEl('model-filter').value = '';
@@ -465,8 +510,8 @@ function clearFilters() {
     getEl('size-filter').value = '';
     getEl('searchInput').value = '';
 
-    updateFilterDropdowns();
-    renderUI();
+    updateFilterDropdowns(); // Reset dependent dropdowns
+    renderUI(); // Re-render with no filters
     showToast('Filters cleared.', 'info');
 }
 
@@ -607,8 +652,8 @@ async function clearSiteSlottingData() {
         showToast("Please select a site first.", "error");
         return;
     }
-    showConfirmationModal('Clear Site Data?', `This will clear all PO and Inventory data for ${appState.selectedSiteId}. This action cannot be undone.`, async () => {
-        setLoading(true, `Clearing data for ${appState.selectedSiteId}...`);
+    showConfirmationModal('Clear Site Data?', `This will clear all PO and Inventory data for ${getEl('site-selector').options[getEl('site-selector').selectedIndex].text}. This action cannot be undone.`, async () => {
+        setLoading(true, `Clearing data for selected site...`);
         appState.finalSlottedData = {};
         appState.unslottedItems = [];
         appState.loadedPOs = {};
@@ -618,6 +663,248 @@ async function clearSiteSlottingData() {
         
         await initializeFromStorage(); // Reload to reflect cleared state
         setLoading(false);
-        showToast(`PO and Inventory data for ${appState.selectedSiteId} has been cleared.`, 'success');
+        showToast(`PO and Inventory data for the site has been cleared.`, 'success');
     });
+}
+
+// Functions that were missing from the previous response but are called from event listeners
+async function loadSites() {
+    const sitesCollectionRef = collection(db, 'sites');
+    const sitesSnapshot = await getDocs(sitesCollectionRef);
+    appState.sites = sitesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    appState.sites.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function createNewSite() {
+    const newSiteNameInput = getEl('new-site-name');
+    const newSiteName = newSiteNameInput.value.trim();
+    if (!newSiteName) {
+        showToast("Please enter a name for the new site.", "error");
+        return;
+    }
+    setLoading(true, `Creating site: ${newSiteName}`);
+    try {
+        const siteId = newSiteName.toLowerCase().replace(/\s+/g, '-');
+        await saveDataToFirestore(`sites/${siteId}`, { name: newSiteName });
+        await loadSites();
+        renderSiteManagementModal();
+        renderSiteSelector();
+        newSiteNameInput.value = '';
+        showToast(`Site "${newSiteName}" created successfully!`, "success");
+    } catch (error) {
+        console.error("Error creating new site:", error);
+        showToast("Could not create the new site.", "error");
+    } finally {
+        setLoading(false);
+    }
+}
+
+async function deleteSite(siteId, siteName) {
+    showConfirmationModal(`Delete ${siteName}?`, 'This will permanently delete the site and all its associated data (settings, slotting, POs). This action cannot be undone.', async () => {
+        setLoading(true, `Deleting site: ${siteName}`);
+        try {
+            // This is a simplified deletion. A robust solution would use a Cloud Function
+            // to recursively delete all subcollections.
+            await deleteDocument(`sites/${siteId}/configs/mainSettings`);
+            await deleteDocument(`sites/${siteId}/configs/exclusionKeywords`);
+            await deleteDocument(`sites/${siteId}/slotting/current`);
+            await clearCollection(`sites/${siteId}/purchaseOrders`);
+            await deleteDocument(`sites/${siteId}`);
+
+            await loadSites();
+            renderSiteManagementModal();
+            renderSiteSelector();
+            
+            if (appState.selectedSiteId === siteId) {
+                appState.selectedSiteId = appState.sites.length > 0 ? appState.sites[0].id : null;
+                getEl('site-selector').value = appState.selectedSiteId;
+                await initializeFromStorage();
+            }
+            showToast(`Site "${siteName}" has been deleted.`, "success");
+        } catch (error) {
+            console.error(`Error deleting site ${siteId}:`, error);
+            showToast("An error occurred while deleting the site.", "error");
+        } finally {
+            setLoading(false);
+        }
+    });
+}
+
+async function setHomeSite() {
+    if (!appState.selectedSiteId) {
+        showToast("Please select a site to set as home.", "error");
+        return;
+    }
+    setLoading(true, "Setting home site...");
+    try {
+        await saveDataToFirestore(`users/${appState.currentUser.uid}`, { homeSiteId: appState.selectedSiteId });
+        appState.currentUser.homeSiteId = appState.selectedSiteId;
+        showToast(`${getEl('site-selector').options[getEl('site-selector').selectedIndex].text} is now your home site.`, "success");
+    } catch (error) {
+        console.error("Error setting home site:", error);
+        showToast("Could not set home site.", "error");
+    } finally {
+        setLoading(false);
+    }
+}
+
+async function handleApprovalAction(uid, action) {
+    const status = action === 'approved' ? 'approved' : 'denied';
+    setLoading(true, `Updating user status to ${status}...`);
+    try {
+        await saveDataToFirestore(`users/${uid}`, {
+            status: status,
+            approvedBy: appState.currentUser.email,
+            approvalTimestamp: serverTimestamp()
+        });
+        renderUserManagementModal();
+        showToast(`User has been ${status}.`, 'success');
+    } catch (error) {
+        console.error(`Error ${action}ing user:`, error);
+        showToast("Could not update user status.", "error");
+    } finally {
+        setLoading(false);
+    }
+}
+
+async function deleteUser(uid, email) {
+    showConfirmationModal(`Delete user ${email}?`, 'This will permanently remove the user from the system. They will need to sign up again to request access.', async () => {
+        setLoading(true, `Deleting user ${email}...`);
+        try {
+            await deleteDocument(`users/${uid}`);
+            renderUserManagementModal();
+            showToast(`User ${email} has been deleted.`, 'success');
+        } catch (error) {
+            console.error("Error deleting user:", error);
+            showToast("Could not delete user.", "error");
+        } finally {
+            setLoading(false);
+        }
+    });
+}
+
+async function updateUserRole(uid, role) {
+    setLoading(true, `Updating role...`);
+    try {
+        await saveDataToFirestore(`users/${uid}`, { role: role });
+        renderUserManagementModal();
+        showToast(`User role updated to ${role}.`, 'success');
+    } catch (error) {
+        console.error("Error updating user role:", error);
+        showToast("Could not update user role.", "error");
+    } finally {
+        setLoading(false);
+    }
+}
+
+async function markPOAsReceived(poKey) {
+    showConfirmationModal('Mark PO as Received?', `This will remove all items from PO "${poKey}" from the inbound list.`, async () => {
+        setLoading(true, `Receiving PO: ${poKey}`);
+        try {
+            await deleteDocument(`sites/${appState.selectedSiteId}/purchaseOrders/${poKey}`);
+            delete appState.loadedPOs[poKey];
+            renderPODetails();
+            showToast(`PO "${poKey}" marked as received.`, 'success');
+        } catch (error) {
+            console.error(`Error receiving PO ${poKey}:`, error);
+            showToast("An error occurred while receiving the PO.", "error");
+        } finally {
+            setLoading(false);
+        }
+    });
+}
+
+async function saveCushionData() {
+    await saveDataToFirestore('configs/cushionData', {
+        levels: appState.cushionLevels,
+        assignments: appState.modelCushionAssignments,
+        models: appState.allKnownModels
+    });
+}
+
+function handleDragStart(e) {
+    if (e.target.classList.contains('detail-slot') && e.target.draggable) {
+        e.dataTransfer.setData('text/plain', e.target.dataset.locationId);
+        e.target.classList.add('dragging');
+    }
+    if (e.target.classList.contains('cushion-level-item')) {
+        e.dataTransfer.setData('text/level', e.target.dataset.level);
+        e.target.classList.add('dragging');
+    }
+}
+
+function handleDragEnd(e) {
+    if (e.target.classList.contains('detail-slot')) {
+        e.target.classList.remove('dragging');
+    }
+    if (e.target.classList.contains('cushion-level-item')) {
+        e.target.classList.remove('dragging');
+    }
+}
+
+function handleDragOver(e) {
+    e.preventDefault();
+    const targetSlot = e.target.closest('.detail-slot');
+    if (targetSlot) {
+        targetSlot.classList.add('drag-over');
+    }
+}
+
+function handleDragLeave(e) {
+    const targetSlot = e.target.closest('.detail-slot');
+    if (targetSlot) {
+        targetSlot.classList.remove('drag-over');
+    }
+}
+
+async function handleDrop(e) {
+    e.preventDefault();
+    const draggedLevel = e.dataTransfer.getData('text/level');
+    if (draggedLevel) {
+        handleCushionLevelDrop(e, draggedLevel);
+        return;
+    }
+    
+    const draggedLocationId = e.dataTransfer.getData('text/plain');
+    const targetSlot = e.target.closest('.detail-slot');
+    if (targetSlot) {
+        targetSlot.classList.remove('drag-over');
+        const targetLocationId = targetSlot.dataset.locationId;
+        if (draggedLocationId && targetLocationId && draggedLocationId !== targetLocationId) {
+            const item1 = appState.finalSlottedData[draggedLocationId];
+            const item2 = appState.finalSlottedData[targetLocationId];
+            
+            // Swap items in the state
+            if (item2) {
+                appState.finalSlottedData[draggedLocationId] = item2;
+                item2.LocationID = draggedLocationId;
+            } else {
+                delete appState.finalSlottedData[draggedLocationId];
+            }
+            appState.finalSlottedData[targetLocationId] = item1;
+            item1.LocationID = targetLocationId;
+            
+            // Re-render and save
+            renderUI();
+            await saveDataToFirestore(`sites/${appState.selectedSiteId}/slotting/current`, { data: appState.finalSlottedData });
+            showToast('Items swapped.', 'success');
+        }
+    }
+}
+
+async function handleCushionLevelDrop(e, draggedLevel) {
+    const targetItem = e.target.closest('.cushion-level-item');
+    if (targetItem) {
+        const targetLevel = targetItem.dataset.level;
+        const draggedIndex = appState.cushionLevels.indexOf(draggedLevel);
+        const targetIndex = appState.cushionLevels.indexOf(targetLevel);
+        if (draggedIndex > -1 && targetIndex > -1) {
+            // Remove and insert to reorder
+            const [removed] = appState.cushionLevels.splice(draggedIndex, 1);
+            appState.cushionLevels.splice(targetIndex, 0, removed);
+            
+            renderCushionUI();
+            await saveCushionData();
+        }
+    }
 }
