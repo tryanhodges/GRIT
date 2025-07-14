@@ -2044,6 +2044,9 @@ async function createNewSite() {
 }
 
 async function deleteSite(siteId, siteName) {
+    // Hide the site management modal immediately to prevent overlap
+    getEl('site-management-modal').classList.remove('visible');
+
     showConfirmationModal('Delete Site?', `Are you sure you want to delete ${siteName}? All associated data (slotting, POs, configs) will be permanently lost. This action cannot be undone.`, async () => {
         setLoading(true, `Deleting site: ${siteName}...`);
         try {
@@ -2070,7 +2073,7 @@ async function deleteSite(siteId, siteName) {
             }
             
             await loadSites();
-            renderSiteManagementModal();
+            // Do not re-render the site management modal, as it's now closed.
 
             if (appState.sites.length > 0) {
                 const siteSelector = getEl('site-selector');

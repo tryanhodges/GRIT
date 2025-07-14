@@ -112,6 +112,12 @@ body {
 .modal-overlay.visible .modal-content {
     transform: scale(1);
 }
+
+/* Ensure confirmation modal appears on top of other modals */
+#confirmation-modal {
+    z-index: 50;
+}
+
 .color-picker-wrapper {
     display: flex;
     align-items: center;
