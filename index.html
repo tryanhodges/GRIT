@@ -369,10 +369,14 @@
                             </div>
                             <div>
                                 <h3 class="section-title">Model Assignments</h3>
-                                <p class="text-sm text-gray-600 mb-4">Assign a cushion level to each model.</p>
-                                <div id="model-assignment-container" class="border rounded-md p-2 bg-gray-50">
-                                    <div id="model-assignment-list" class="space-y-3 max-h-96 overflow-y-auto pr-2">
-                                        <!-- Model assignments will be rendered here -->
+                                <div id="model-assignment-container" class="border rounded-md p-4 bg-gray-50">
+                                    <label class="file-input-btn w-full text-center">
+                                        Upload Inventory to Add Models
+                                        <input type="file" id="cushionModelFile" class="hidden" accept=".csv" multiple>
+                                    </label>
+                                    <div id="cushionModelFileName" class="mt-2 text-sm text-gray-500"></div>
+                                    <div id="model-assignment-list" class="mt-4 space-y-3 max-h-80 overflow-y-auto pr-2">
+                                        <p class="text-gray-500">No models loaded. Upload an inventory file to begin.</p>
                                     </div>
                                 </div>
                             </div>
@@ -407,7 +411,7 @@
 
             <!-- START: Metrics & Search -->
             <div id="overview-controls" class="hidden">
-                <details id="metrics-container" class="bg-white p-6 rounded-xl shadow-md mb-8" open>
+                <details id="metrics-container" class="bg-white p-6 rounded-xl shadow-md mb-8">
                     <summary class="font-semibold text-lg text-gray-800 flex justify-between items-center cursor-pointer">
                         <span>Operational Metrics</span>
                         <svg class="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>

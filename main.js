@@ -56,6 +56,7 @@ const appState = {
     exclusionKeywords: [],
     cushionLevels: [],
     modelCushionAssignments: {},
+    allKnownModels: [], // NEW: To store all unique models for cushioning
     currentView: 'grid',
     selectedRackId: 1,
     brandChart: null,
@@ -283,6 +284,7 @@ async function initializeFromStorage() {
     if(cushionData) {
         appState.cushionLevels = cushionData.levels || [];
         appState.modelCushionAssignments = cushionData.assignments || {};
+        appState.allKnownModels = cushionData.models || []; // Load known models
     }
 
     const poCollectionRef = collection(db, `sites/${appState.selectedSiteId}/purchaseOrders`);
@@ -581,7 +583,7 @@ function runLocalSlottingAlgorithm(data) {
             if (exclusionKeywords.some(kw => itemString.toLowerCase().includes(kw.toLowerCase()))) continue;
             const remaining = parseInt(cols[remainingIndex], 10);
             if (itemString && !isNaN(remaining) && remaining > 0) {
-                const { Model, Color, Size, Sex } = parseItemString(itemString);
+                const { Model, Color, Size, Sex } = parseItemString(itemString, brand);
                 if (!settings.includeKids && (Sex === 'Y' || Sex === 'K')) continue;
                 for (let j = 0; j < remaining; j++) {
                     allInventoryItems.push({
@@ -620,7 +622,7 @@ function runLocalSlottingAlgorithm(data) {
             const unreceivedQty = quantity - checkedIn;
 
             if (itemString && unreceivedQty > 0) {
-                const { Model, Color, Size, Sex } = parseItemString(itemString);
+                const { Model, Color, Size, Sex } = parseItemString(itemString, brand);
                 if (!settings.includeKids && (Sex === 'Y' || Sex === 'K')) continue;
                 for (let j = 0; j < unreceivedQty; j++) {
                     allPoItems.push({
@@ -850,6 +852,7 @@ async function runSlottingProcess() {
         await batch.commit();
 
         renderMetricsPanel(result.newlySlottedCount);
+        getEl('metrics-container').open = false; // Collapse metrics after run
         renderUnslottedReport();
         updateFilterDropdowns();
         renderUI();
@@ -871,10 +874,21 @@ function toTitleCase(str) {
     return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }
 
-function parseItemString(itemString) {
+function parseItemString(itemString, brand = '') {
     let sex = 'M';
     let cleanItemString = itemString ? itemString.trim() : '';
     if (!cleanItemString) return { Model: 'N/A', Color: 'N/A', Size: 'N/A', Sex: sex };
+
+    // BROOKS-specific logic
+    if (brand.toUpperCase() === 'BROOKS') {
+        // Find a 3-digit number separator
+        const brooksRegex = /^(.*?)\s+(\d{3})\s+(.*)$/;
+        const match = cleanItemString.match(brooksRegex);
+        if (match) {
+            // Reconstruct the string without the 3-digit number
+            cleanItemString = `${match[1]} ${match[3]}`;
+        }
+    }
 
     const firstChar = cleanItemString.charAt(0).toUpperCase();
     if (['M', 'W', 'Y', 'K'].includes(firstChar)) {
@@ -945,7 +959,7 @@ async function parsePOFiles(fileList) {
             const unreceivedQty = quantity - checkedIn;
 
             if (itemString && unreceivedQty > 0) {
-                const { Model, Color, Size, Sex } = parseItemString(itemString);
+                const { Model, Color, Size, Sex } = parseItemString(itemString, brand);
                  if (!includeKids && (Sex === 'Y' || Sex === 'K')) {
                     continue;
                 }
@@ -1456,7 +1470,8 @@ async function removeExclusionKeyword(keyword) {
 async function saveCushionData() {
     const dataToSave = {
         levels: appState.cushionLevels,
-        assignments: appState.modelCushionAssignments
+        assignments: appState.modelCushionAssignments,
+        models: appState.allKnownModels // Save the list of known models
     };
     await saveDataToFirestore('configs/cushionData', dataToSave);
 }
@@ -1489,14 +1504,14 @@ async function removeCushionLevel(levelToRemove) {
     showToast(`Cushion level '${levelToRemove}' removed.`, 'info');
 }
 
-function updateModelAssignmentList(allItems) {
+function updateModelAssignmentList() {
     const container = getEl('model-assignment-list');
     container.innerHTML = '';
     
-    const uniqueModels = [...new Set(allItems.map(item => item.Model))].sort();
+    const uniqueModels = appState.allKnownModels.sort();
 
     if (uniqueModels.length === 0) {
-        container.innerHTML = '<p class="text-gray-500">Upload an inventory file to see models to assign.</p>';
+        container.innerHTML = '<p class="text-gray-500">No models loaded. Upload an inventory file to begin.</p>';
         return;
     }
 
@@ -1623,7 +1638,7 @@ function renderCushionUI() {
         showToast('Cushion priority updated.', 'success');
     });
 
-    updateModelAssignmentList([]);
+    updateModelAssignmentList();
 }
 
 function getDragAfterElement(container, y) {
