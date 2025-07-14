@@ -131,7 +131,6 @@ function showConfirmationModal(title, message, onConfirm) {
 // --- Firestore Data Functions (Corrected for Subcollections) ---
 async function saveDataToFirestore(fullPath, data) {
     try {
-        // Use the new modular syntax: doc(db, path, to, document)
         const docRef = doc(db, fullPath);
         await setDoc(docRef, data, { merge: true });
     } catch (e) {
@@ -143,8 +142,8 @@ async function saveDataToFirestore(fullPath, data) {
 async function loadDataFromFirestore(fullPath) {
     try {
         const docRef = doc(db, fullPath);
-        const docSnap = await getDoc(docRef); // getDoc() instead of .get()
-        if (docSnap.exists()) { // .exists() is now a function
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
             return docSnap.data();
         }
         return null;
@@ -155,8 +154,6 @@ async function loadDataFromFirestore(fullPath) {
     }
 }
 
-// NOTE: This function is no longer used for deleting sites, as that is now handled
-// by a secure serverless function. It remains for other potential uses.
 async function deleteDocument(fullPath) {
     try {
         const docRef = doc(db, fullPath);
@@ -600,21 +597,32 @@ function runLocalSlottingAlgorithm(data) {
     let allPoItems = [];
     poData.forEach(poFile => {
         const brand = poFile.brand;
-        const lines = poFile.content.split('\n').map(l => l.split(','));
-        const header = lines[0].map(h => h.replace(/"/g, '').toLowerCase());
-        const itemIndex = header.indexOf('item');
-        const qtyIndex = header.indexOf('order qty');
+        const lines = robustCSVParse(poFile.content);
+        if (lines.length < 2) return;
+
+        const headerMap = createHeaderMap(lines[0]);
+        const itemIndex = headerMap['item'];
+        const qtyIndex = headerMap['quantity'];
+        const checkedInIndex = headerMap['checked in'];
+
+        if (itemIndex === undefined || qtyIndex === undefined || checkedInIndex === undefined) {
+             console.warn(`Skipping PO file ${poFile.name}: Missing 'Item', 'Quantity', or 'Checked In' column.`);
+             return;
+        }
 
         for (let i = 1; i < lines.length; i++) {
-            const cols = lines[i].map(c => c.replace(/"/g, ''));
-            if (cols.length < Math.max(itemIndex, qtyIndex) + 1) continue;
+            const cols = lines[i];
             const itemString = cols[itemIndex];
             if (exclusionKeywords.some(kw => itemString.toLowerCase().includes(kw.toLowerCase()))) continue;
-            const orderQty = parseInt(cols[qtyIndex], 10);
-            if (itemString && !isNaN(orderQty) && orderQty > 0) {
+            
+            const quantity = parseInt(cols[qtyIndex], 10) || 0;
+            const checkedIn = parseInt(cols[checkedInIndex], 10) || 0;
+            const unreceivedQty = quantity - checkedIn;
+
+            if (itemString && unreceivedQty > 0) {
                 const { Model, Color, Size, Sex } = parseItemString(itemString);
                 if (!settings.includeKids && (Sex === 'Y' || Sex === 'K')) continue;
-                for (let j = 0; j < orderQty; j++) {
+                for (let j = 0; j < unreceivedQty; j++) {
                     allPoItems.push({
                         Brand: brand, Model, Color, Size, Sex, Type: 'PO',
                         UniqueID: `${poFile.name}-${brand}-${Model}-${Color}-${Size}-PO-${j + 1}`, OriginalItemString: itemString
@@ -796,6 +804,9 @@ async function runSlottingProcess() {
         }
 
         await Promise.all(readFilePromises);
+        
+        // This function now also updates the POs in the receiving tab
+        await parsePOFiles(poFiles);
 
         setLoading(true, 'Processing... This may take a moment.');
 
@@ -826,14 +837,12 @@ async function runSlottingProcess() {
         const slottingResults = {
             data: appState.finalSlottedData,
             unslotted: appState.unslottedItems,
-            lastUpdated: serverTimestamp(), // Use modular function
+            lastUpdated: serverTimestamp(),
             updatedBy: appState.currentUser.email
         };
         await saveDataToFirestore(`sites/${appState.selectedSiteId}/slotting/current`, slottingResults);
 
-
-        await parsePOFiles(poFiles);
-        const batch = writeBatch(db); // Use modular function
+        const batch = writeBatch(db);
         Object.entries(appState.loadedPOs).forEach(([poKey, po]) => {
             const poRef = doc(db, `sites/${appState.selectedSiteId}/purchaseOrders`, poKey);
             batch.set(poRef, po);
@@ -915,9 +924,11 @@ async function parsePOFiles(fileList) {
 
         const headerMap = createHeaderMap(lines[0]);
         const itemIndex = headerMap['item'];
-        const qtyIndex = headerMap['order qty'];
-        if (itemIndex === undefined || qtyIndex === undefined) {
-            showToast(`Skipping ${file.name}: Missing 'Item' or 'Order Qty' column.`, 'error');
+        const qtyIndex = headerMap['quantity'];
+        const checkedInIndex = headerMap['checked in'];
+
+        if (itemIndex === undefined || qtyIndex === undefined || checkedInIndex === undefined) {
+            showToast(`Skipping ${file.name}: Missing 'Item', 'Quantity', or 'Checked In' column.`, 'error');
             continue;
         }
 
@@ -928,14 +939,17 @@ async function parsePOFiles(fileList) {
             if (appState.exclusionKeywords.some(kw => itemString.toLowerCase().includes(kw.toLowerCase()))) {
                 continue;
             }
-            const orderQty = parseInt(cols[qtyIndex], 10);
+            
+            const quantity = parseInt(cols[qtyIndex], 10) || 0;
+            const checkedIn = parseInt(cols[checkedInIndex], 10) || 0;
+            const unreceivedQty = quantity - checkedIn;
 
-            if (itemString && !isNaN(orderQty) && orderQty > 0) {
+            if (itemString && unreceivedQty > 0) {
                 const { Model, Color, Size, Sex } = parseItemString(itemString);
                  if (!includeKids && (Sex === 'Y' || Sex === 'K')) {
                     continue;
                 }
-                for (let j = 0; j < orderQty; j++) {
+                for (let j = 0; j < unreceivedQty; j++) {
                     poItems.push({ 
                         Brand: brand, Model, Color, Size, Sex, 
                         Sales: -1, Type: 'PO', 
@@ -948,12 +962,11 @@ async function parsePOFiles(fileList) {
 
         if (poItems.length > 0) {
             const poKey = file.name;
-            const currentPOState = appState.loadedPOs[poKey] || {};
             appState.loadedPOs[poKey] = {
                 brand,
                 itemCount: poItems.length,
-                loadedDate: currentPOState.loadedDate || new Date().toLocaleDateString(),
-                status: currentPOState.status || 'unreceived',
+                loadedDate: new Date().toLocaleDateString(),
+                status: 'unreceived',
                 items: poItems
             };
             const fileNamesContainer = getEl('poFileNames');
@@ -961,6 +974,9 @@ async function parsePOFiles(fileList) {
             if (fileDiv) {
                 fileDiv.innerHTML = `${file.name} <span class="text-gray-400">- ${poItems.length} items</span>`;
             }
+        } else {
+            // If a PO file is uploaded but has no unreceived items, remove it from the list
+            delete appState.loadedPOs[file.name];
         }
     }
     if(newPOsLoaded) renderPODetails();
@@ -1033,13 +1049,23 @@ async function markPOAsReceived(poKey) {
     poData.status = 'received';
     const poItemIds = new Set(poData.items.map(item => item.UniqueID));
 
+    // This is the core logic: find the already-slotted PO items and update their type.
     for (const loc in appState.finalSlottedData) {
-        if (poItemIds.has(appState.finalSlottedData[loc].UniqueID)) {
-            appState.finalSlottedData[loc].Type = 'Inventory';
+        const item = appState.finalSlottedData[loc];
+        if (item.Type === 'PO' && poItemIds.has(item.UniqueID)) {
+            item.Type = 'Inventory';
         }
     }
     
+    // Save the updated PO status and the updated slotting map
     await saveDataToFirestore(`sites/${appState.selectedSiteId}/purchaseOrders/${poKey}`, poData);
+    await saveDataToFirestore(`sites/${appState.selectedSiteId}/slotting/current`, {
+        data: appState.finalSlottedData,
+        unslotted: appState.unslottedItems,
+        lastUpdated: serverTimestamp(),
+        updatedBy: appState.currentUser.email
+    });
+
     renderPODetails();
     renderUI();
     renderMetricsPanel();
@@ -1444,7 +1470,7 @@ async function addCushionLevel() {
         renderCushionUI();
         input.value = '';
         showToast(`Cushion level '${level}' added.`, 'success');
-    } else if (!level) { // Corrected from `!keyword`
+    } else if (!level) {
         showToast('Please enter a cushion level name.', 'error');
     } else {
         showToast(`'${level}' already exists.`, 'info');
@@ -2018,26 +2044,24 @@ async function createNewSite() {
 }
 
 async function deleteSite(siteId, siteName) {
-    showConfirmationModal('Delete Site?', `Are you sure you want to delete ${siteName}? All associated data will be permanently lost. This action cannot be undone.`, async () => {
+    showConfirmationModal('Delete Site?', `Are you sure you want to delete ${siteName}? All associated data (slotting, POs, configs) will be permanently lost. This action cannot be undone.`, async () => {
         setLoading(true, `Deleting site: ${siteName}...`);
         try {
-            const user = auth.currentUser;
-            if (!user) throw new Error("Authentication required.");
-            
-            const token = await user.getIdToken();
-            const response = await fetch('/.netlify/functions/delete-site', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ siteId: siteId })
-            });
+            const subcollections = ['slotting', 'configs', 'purchaseOrders'];
 
-            if (!response.ok) {
-                const errorResult = await response.json();
-                throw new Error(errorResult.error || 'Server failed to delete site.');
+            for (const sub of subcollections) {
+                const subCollectionRef = collection(db, `sites/${siteId}/${sub}`);
+                const snapshot = await getDocs(subCollectionRef);
+                const batch = writeBatch(db);
+                snapshot.docs.forEach(doc => {
+                    batch.delete(doc.ref);
+                });
+                await batch.commit();
+                console.log(`Deleted all documents in subcollection: ${sub}`);
             }
+            
+            await deleteDoc(doc(db, `sites/${siteId}`));
+            console.log(`Deleted main site document: ${siteId}`);
 
             showToast("Site deleted successfully.", "success");
             
@@ -2062,7 +2086,7 @@ async function deleteSite(siteId, siteName) {
                 updateUiForSiteSelection();
             }
         } catch (error) {
-            console.error("Error calling delete-site function:", error);
+            console.error("Error deleting site from client:", error);
             showToast(`Error deleting site: ${error.message}`, "error");
         } finally {
             setLoading(false);
@@ -2202,7 +2226,11 @@ document.addEventListener('DOMContentLoaded', function () {
 function initializeEventListeners() {
     getEl('prevSlottingFile').addEventListener('change', (e) => handleFileChange(e, 'prevSlottingFileName'));
     getEl('inventoryFile').addEventListener('change', (e) => handleMultiFileChange(e, 'inventoryFileNames', 'clearInventoryBtn'));
-    getEl('poFile').addEventListener('change', (e) => handleMultiFileChange(e, 'poFileNames', 'clearPOsBtn'));
+    getEl('poFile').addEventListener('change', (e) => {
+        handleMultiFileChange(e, 'poFileNames', 'clearPOsBtn');
+        // When a PO file is uploaded, immediately parse it to update the receiving tab
+        parsePOFiles(e.target.files);
+    });
 
     getEl('slotBtn').addEventListener('click', runSlottingProcess);
     getEl('viewToggleBtn').addEventListener('click', toggleView);
@@ -2226,7 +2254,7 @@ function initializeEventListeners() {
     getEl('size-filter').addEventListener('change', () => { renderUI(); });
 
     getEl('invTemplateBtn').addEventListener('click', (e) => { e.preventDefault(); downloadFile(`"System ID","UPC","EAN","Custom SKU","Manufact. SKU","Item","Remaining","total cost","avg. cost","sale price","margin"\n"ignore","ignore","ignore","ignore","ignore","Cloudsurfer | Undyed/White 11.5","2","ignore","ignore","ignore","ignore"`, 'inventory_template.csv'); });
-    getEl('poTemplateBtn').addEventListener('click', (e) => { e.preventDefault(); downloadFile(`"System ID","Item","UPC","EAN","Custom SKU","Manufact. SKU","#","Vendor ID","special order qty","Retail price","Qty. On Hand","Qty. On Order","Desired Inventory Level","Order Qty"\n"ignore","Cloud 5 | Black/White 10.5","ignore","ignore","ignore","ignore","ignore","ignore","ignore","ignore","ignore","ignore","ignore","5"`, 'po_template.csv'); });
+    getEl('poTemplateBtn').addEventListener('click', (e) => { e.preventDefault(); downloadFile(`"PO Number","Item","Quantity","Checked In"\n"12345","Cloud 5 | Black/White 10.5","5","0"`, 'po_template.csv'); });
 
     const tabs = document.querySelectorAll('.tab-button');
     const tabContents = document.querySelectorAll('.tab-content');
