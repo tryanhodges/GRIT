@@ -79,16 +79,19 @@ export function generateCSV(slottedItems) {
 }
 
 /**
- * A more robust CSV parser that handles quoted fields, different line endings, and BOM characters.
+ * A more robust CSV parser that handles quoted fields, different line endings, BOM, and smart quotes.
  * @param {string} csvText The CSV text to parse.
  * @returns {Array<Array<string>>}
  */
 export function robustCSVParse(csvText) {
-    // MODIFICATION: Remove Byte Order Mark (BOM) if present
+    // Remove Byte Order Mark (BOM) if present
     if (csvText.charCodeAt(0) === 0xFEFF) {
         csvText = csvText.slice(1);
     }
     
+    // MODIFICATION: Normalize "smart" or "curly" quotes to standard straight quotes
+    csvText = csvText.replace(/[\u201C\u201D\u201E]/g, '"');
+
     const lines = csvText.trim().split(/\r?\n/);
     const result = [];
     // This regex handles commas inside of double-quoted fields.
