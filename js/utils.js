@@ -71,19 +71,23 @@ export function generateCSV(slottedItems) {
     Object.entries(slottedItems)
         .sort(([locA], [locB]) => locA.localeCompare(locB, undefined, {numeric: true}))
         .forEach(([loc, item]) => {
-            csv += `"${item.UniqueID||''}","${item.Brand||''}","${item.Model||''}","${item.Size||''}","${item.Color||''}","${loc}","${item.Type||''}","${item.Sex||''}","${item.OriginalItemString||''}"\n`;
+            // Ensure OriginalItemString is properly quoted to handle commas
+            const originalItemString = `"${(item.OriginalItemString || '').replace(/"/g, '""')}"`;
+            csv += `"${item.UniqueID||''}","${item.Brand||''}","${item.Model||''}","${item.Size||''}","${item.Color||''}",${loc},"${item.Type||''}","${item.Sex||''}",${originalItemString}\n`;
         });
     return csv;
 }
 
 /**
- * A more robust CSV parser that handles quoted fields containing commas.
+ * A more robust CSV parser that handles quoted fields containing commas and different line endings.
  * @param {string} csvText The CSV text to parse.
  * @returns {Array<Array<string>>}
  */
 export function robustCSVParse(csvText) {
-    const lines = csvText.trim().split('\n');
+    // MODIFICATION: Split by both \n and \r\n to handle different file formats
+    const lines = csvText.trim().split(/\r?\n/);
     const result = [];
+    // This regex handles commas inside of double-quoted fields.
     const regex = /(?:^|,)(\"(?:[^\"]+|\"\")*\"|[^,]*)/g;
 
     for (const line of lines) {
@@ -92,7 +96,7 @@ export function robustCSVParse(csvText) {
         let match;
         while (match = regex.exec(line)) {
             let column = match[1];
-            // Remove quotes and unescape double quotes
+            // Remove surrounding quotes and unescape double quotes
             if (column.startsWith('"') && column.endsWith('"')) {
                 column = column.substring(1, column.length - 1).replace(/""/g, '"');
             }
