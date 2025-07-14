@@ -1,6 +1,34 @@
+// --- START: Firebase v9+ Modular Imports ---
+// Import the functions you need from the SDKs you need.
+// This modern approach allows for "tree-shaking" which reduces the final app size.
+import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-app.js";
+import {
+    getAuth,
+    onAuthStateChanged,
+    GoogleAuthProvider,
+    signInWithPopup,
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword,
+    signOut
+} from "https://www.gstatic.com/firebasejs/9.22.1/firebase-auth.js";
+import {
+    getFirestore,
+    doc,
+    setDoc,
+    getDoc,
+    deleteDoc,
+    collection,
+    getDocs,
+    updateDoc,
+    serverTimestamp,
+    writeBatch,
+    limit,
+    query
+} from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
+// --- END: Firebase v9+ Modular Imports ---
+
+
 // --- START: Firebase Configuration ---
-// TODO: Add your Firebase project configuration here
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyCb31JTu267sVk65VG--Grlp14w6cpkq2c",
   authDomain: "grit-7fb60.firebaseapp.com",
@@ -11,10 +39,10 @@ const firebaseConfig = {
   measurementId: "G-LJ16FE68W4"
 };
 
-// Initialize Firebase
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-const auth = firebase.auth();
+// Initialize Firebase using the new modular functions
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
 // --- END: Firebase Configuration ---
 
 
@@ -103,8 +131,9 @@ function showConfirmationModal(title, message, onConfirm) {
 // --- Firestore Data Functions (Corrected for Subcollections) ---
 async function saveDataToFirestore(fullPath, data) {
     try {
-        const docRef = db.doc(fullPath);
-        await docRef.set(data, { merge: true });
+        // Use the new modular syntax: doc(db, path, to, document)
+        const docRef = doc(db, fullPath);
+        await setDoc(docRef, data, { merge: true });
     } catch (e) {
         console.error(`Error saving to Firestore path "${fullPath}":`, e);
         showToast("Error saving data to the cloud.", "error");
@@ -113,10 +142,10 @@ async function saveDataToFirestore(fullPath, data) {
 
 async function loadDataFromFirestore(fullPath) {
     try {
-        const docRef = db.doc(fullPath);
-        const doc = await docRef.get();
-        if (doc.exists) {
-            return doc.data();
+        const docRef = doc(db, fullPath);
+        const docSnap = await getDoc(docRef); // getDoc() instead of .get()
+        if (docSnap.exists()) { // .exists() is now a function
+            return docSnap.data();
         }
         return null;
     } catch (e) {
@@ -126,10 +155,12 @@ async function loadDataFromFirestore(fullPath) {
     }
 }
 
+// NOTE: This function is no longer used for deleting sites, as that is now handled
+// by a secure serverless function. It remains for other potential uses.
 async function deleteDocument(fullPath) {
     try {
-        const docRef = db.doc(fullPath);
-        await docRef.delete();
+        const docRef = doc(db, fullPath);
+        await deleteDoc(docRef);
     } catch (e) {
         console.error(`Error deleting document at path "${fullPath}":`, e);
         showToast("Error deleting data from the cloud.", "error");
@@ -201,12 +232,10 @@ async function initializeFromStorage() {
     }
     setLoading(true, `Loading data for ${appState.selectedSiteId}...`);
     
-    // Reset local state before loading new site data
     appState.finalSlottedData = {};
     appState.unslottedItems = [];
     appState.exclusionKeywords = [];
     
-    // Define default values
     const defaultSettings = {
         rackCount: 26,
         sectionsPerRack: 8,
@@ -224,14 +253,10 @@ async function initializeFromStorage() {
         cushionIndicatorColor: '#6b7280'
     };
 
-    // Load stored settings
     const settingsPath = `sites/${appState.selectedSiteId}/configs/mainSettings`;
     const storedSettings = await loadDataFromFirestore(settingsPath);
-
-    // Merge stored settings over defaults. If storedSettings is null, this uses defaults.
     const finalSettings = { ...defaultSettings, ...storedSettings };
 
-    // Update UI elements from the final, merged settings
     getEl('rackCount').value = finalSettings.rackCount;
     getEl('sectionsPerRack').value = finalSettings.sectionsPerRack;
     getEl('stacksPerSection').value = finalSettings.stacksPerSection;
@@ -247,7 +272,6 @@ async function initializeFromStorage() {
     getEl('colorKidsPO').value = finalSettings.colorMap.K.po;
     getEl('colorCushion').value = finalSettings.cushionIndicatorColor;
 
-    // Update appState from the final, merged settings
     appState.userInitials = finalSettings.userInitials;
     appState.colorMap = finalSettings.colorMap;
     appState.cushionIndicatorColor = finalSettings.cushionIndicatorColor;
@@ -264,7 +288,8 @@ async function initializeFromStorage() {
         appState.modelCushionAssignments = cushionData.assignments || {};
     }
 
-    const poSnapshot = await db.collection(`sites/${appState.selectedSiteId}/purchaseOrders`).get();
+    const poCollectionRef = collection(db, `sites/${appState.selectedSiteId}/purchaseOrders`);
+    const poSnapshot = await getDocs(poCollectionRef);
     appState.loadedPOs = {};
     poSnapshot.forEach(doc => {
         appState.loadedPOs[doc.id] = doc.data();
@@ -337,7 +362,6 @@ async function executeSearch() {
         return;
     }
 
-    // If search is cleared, reload data for the current site
     if (!searchTerm) {
         await initializeFromStorage();
         return;
@@ -345,7 +369,6 @@ async function executeSearch() {
 
     setLoading(true, `Searching site ${appState.selectedSiteId} for "${searchTerm}"...`);
     try {
-        // *** MODIFIED: Query only the current site's slotting document ***
         const slottingData = await loadDataFromFirestore(`sites/${appState.selectedSiteId}/slotting/current`);
         let searchResults = {};
 
@@ -803,17 +826,16 @@ async function runSlottingProcess() {
         const slottingResults = {
             data: appState.finalSlottedData,
             unslotted: appState.unslottedItems,
-            lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
+            lastUpdated: serverTimestamp(), // Use modular function
             updatedBy: appState.currentUser.email
         };
         await saveDataToFirestore(`sites/${appState.selectedSiteId}/slotting/current`, slottingResults);
 
 
-        // The function doesn't need to save POs, the client does after parsing
-        await parsePOFiles(poFiles); 
-        const batch = db.batch();
+        await parsePOFiles(poFiles);
+        const batch = writeBatch(db); // Use modular function
         Object.entries(appState.loadedPOs).forEach(([poKey, po]) => {
-            const poRef = db.collection(`sites/${appState.selectedSiteId}/purchaseOrders`).doc(poKey);
+            const poRef = doc(db, `sites/${appState.selectedSiteId}/purchaseOrders`, poKey);
             batch.set(poRef, po);
         });
         await batch.commit();
@@ -885,7 +907,6 @@ async function parsePOFiles(fileList) {
     const includeKids = getEl('includeKids').checked;
     let newPOsLoaded = false;
     for (const file of fileList) {
-        // Always re-parse to apply current settings
         newPOsLoaded = true;
         const brand = toTitleCase(file.name.replace(/\s*\d*\.csv$/i, '').trim());
         const csvText = await readFileAsText(file);
@@ -919,7 +940,7 @@ async function parsePOFiles(fileList) {
                         Brand: brand, Model, Color, Size, Sex, 
                         Sales: -1, Type: 'PO', 
                         UniqueID: `${file.name}-${brand}-${Model}-${Color}-${Size}-PO-${j + 1}`,
-                        OriginalItemString: itemString // Save original string
+                        OriginalItemString: itemString
                     });
                 }
             }
@@ -946,8 +967,6 @@ async function parsePOFiles(fileList) {
 }
 
 function robustCSVParse(csvText) {
-  // Simple parser: splits by newline, then by comma.
-  // For a production app, a more robust library might be needed to handle edge cases.
   return csvText.trim().split('\n').map(line => line.split(',').map(field => field.trim().replace(/"/g, '')));
 }
 
@@ -1041,7 +1060,6 @@ function renderUI() {
     container.innerHTML = '';
     const totalRacks = parseInt(getEl('rackCount')?.value) || 26;
 
-    // --- Search & Filter Logic ---
     const searchTerm = getEl('searchInput')?.value.toLowerCase() || '';
     const brandFilter = getEl('brand-filter').value;
     const modelFilter = getEl('model-filter').value;
@@ -1197,7 +1215,7 @@ function renderDetailView(container, totalRacks, isFiltering, matchingSlots, mat
                     const locationId = `${appState.selectedRackId}-${sectionId}-${stackId}-${slotId}`;
                     const slotEl = document.createElement('div');
                     slotEl.className = 'detail-slot';
-                    slotEl.dataset.locationId = locationId; // Add location ID for drag/drop
+                    slotEl.dataset.locationId = locationId;
                     
                     const item = appState.finalSlottedData[locationId];
                     if (item) {
@@ -1209,7 +1227,6 @@ function renderDetailView(container, totalRacks, isFiltering, matchingSlots, mat
                         slotEl.addEventListener('dragstart', handleDragStart);
                         slotEl.addEventListener('dragend', handleDragEnd);
 
-                        // Add cushion indicator bar
                         const cushionLevel = appState.modelCushionAssignments[item.Model];
                         if (cushionLevel) {
                             const levelIndex = appState.cushionLevels.indexOf(cushionLevel);
@@ -1223,7 +1240,6 @@ function renderDetailView(container, totalRacks, isFiltering, matchingSlots, mat
                         slotEl.innerHTML = `<span class="text-gray-400 text-xs">${locationId}</span>`;
                     }
 
-                    // Add drop event listeners to ALL slots
                     slotEl.addEventListener('dragover', handleDragOver);
                     slotEl.addEventListener('dragleave', handleDragLeave);
                     slotEl.addEventListener('drop', handleDrop);
@@ -1428,7 +1444,7 @@ async function addCushionLevel() {
         renderCushionUI();
         input.value = '';
         showToast(`Cushion level '${level}' added.`, 'success');
-    } else if (!keyword) {
+    } else if (!level) { // Corrected from `!keyword`
         showToast('Please enter a cushion level name.', 'error');
     } else {
         showToast(`'${level}' already exists.`, 'info');
@@ -1437,7 +1453,6 @@ async function addCushionLevel() {
 
 async function removeCushionLevel(levelToRemove) {
     appState.cushionLevels = appState.cushionLevels.filter(level => level !== levelToRemove);
-    // Also remove any assignments that used this level
     for (const model in appState.modelCushionAssignments) {
         if (appState.modelCushionAssignments[model] === levelToRemove) {
             delete appState.modelCushionAssignments[model];
@@ -1500,15 +1515,12 @@ function getCushionIndicatorColor(levelIndex) {
     const baseColor = appState.cushionIndicatorColor;
     const totalLevels = appState.cushionLevels.length;
     
-    // Return transparent if no levels or invalid index
     if (totalLevels === 0 || levelIndex === -1) {
         return 'transparent';
     }
 
-    // Calculate opacity from 1.0 (for index 0) down to 0.1
     const opacity = 1.0 - (levelIndex / (totalLevels -1 || 1)) * 0.9;
 
-    // Convert hex to RGB
     let r = 0, g = 0, b = 0;
     if (baseColor.length === 7) {
         r = parseInt(baseColor.substring(1, 3), 16);
@@ -1581,11 +1593,11 @@ function renderCushionUI() {
         const newOrder = Array.from(list.querySelectorAll('.cushion-level-item')).map(item => item.dataset.level);
         appState.cushionLevels = newOrder;
         await saveCushionData();
-        renderCushionUI(); // Re-render to update model assignment dropdowns and swatches
+        renderCushionUI();
         showToast('Cushion priority updated.', 'success');
     });
 
-    updateModelAssignmentList([]); // Initial render with empty list
+    updateModelAssignmentList([]);
 }
 
 function getDragAfterElement(container, y) {
@@ -1716,7 +1728,7 @@ function handleDragEnd(e) {
 }
 
 function handleDragOver(e) {
-    e.preventDefault(); // Necessary to allow dropping
+    e.preventDefault();
     const targetSlot = e.target.closest('.detail-slot');
     if (targetSlot && !appState.finalSlottedData[targetSlot.dataset.locationId]) {
         targetSlot.classList.add('drag-over');
@@ -1742,18 +1754,15 @@ function handleDrop(e) {
     const sourceLocationId = e.dataTransfer.getData('text/plain');
     const targetLocationId = targetSlot.dataset.locationId;
 
-    // Prevent dropping on itself or on an occupied slot
     if (sourceLocationId === targetLocationId || appState.finalSlottedData[targetLocationId]) {
         return;
     }
 
-    // Perform the move in the data model
     const itemToMove = appState.finalSlottedData[sourceLocationId];
-    itemToMove.LocationID = targetLocationId; // Update the item's internal location
+    itemToMove.LocationID = targetLocationId;
     appState.finalSlottedData[targetLocationId] = itemToMove;
     delete appState.finalSlottedData[sourceLocationId];
 
-    // Re-render the entire UI to reflect the change
     renderUI();
     showToast(`Moved item to ${targetLocationId}`, 'success');
 }
@@ -1772,10 +1781,9 @@ function clearAuthError() {
 
 async function handleGoogleSignIn() {
     clearAuthError();
-    const provider = new firebase.auth.GoogleAuthProvider();
+    const provider = new GoogleAuthProvider();
     try {
-        await auth.signInWithPopup(provider);
-        // onAuthStateChanged will handle the rest
+        await signInWithPopup(auth, provider);
     } catch (error) {
         showAuthError(error.message);
     }
@@ -1793,9 +1801,7 @@ async function handleSignUp() {
 
     setLoading(true, "Creating account...");
     try {
-        await auth.createUserWithEmailAndPassword(email, password);
-        // onAuthStateChanged will handle creating the user profile and then signing them out
-        // because their status will be 'pending'.
+        await createUserWithEmailAndPassword(auth, email, password);
     } catch (error) {
         showAuthError(error.message);
     } finally {
@@ -1815,8 +1821,7 @@ async function handleSignIn() {
     
     setLoading(true, "Logging in...");
     try {
-        await auth.signInWithEmailAndPassword(email, password);
-        // onAuthStateChanged will handle the rest
+        await signInWithEmailAndPassword(auth, email, password);
     } catch (error) {
         showAuthError(error.message);
     } finally {
@@ -1825,13 +1830,12 @@ async function handleSignIn() {
 }
 
 function handleSignOut() {
-    auth.signOut();
+    signOut(auth);
 }
 
 function adjustUiForRole(role) {
     const isManager = role === 'manager';
     
-    // Toggle visibility of all manager-only elements
     document.querySelectorAll('.manager-only').forEach(el => {
         el.classList.toggle('hidden', !isManager);
     });
@@ -1846,7 +1850,8 @@ async function renderUserManagementModal() {
     activeContainer.innerHTML = '';
 
     try {
-        const usersSnapshot = await db.collection('users').get();
+        const usersCollectionRef = collection(db, 'users');
+        const usersSnapshot = await getDocs(usersCollectionRef);
         pendingContainer.innerHTML = '';
         
         const pendingUsers = [];
@@ -1856,12 +1861,11 @@ async function renderUserManagementModal() {
             const user = { id: doc.id, ...doc.data() };
             if (user.status === 'pending') {
                 pendingUsers.push(user);
-            } else if (user.status !== 'denied') { // Show only active users
+            } else if (user.status !== 'denied') {
                 activeUsers.push(user);
             }
         });
 
-        // Render Pending Users
         if (pendingUsers.length === 0) {
             pendingContainer.innerHTML = '<p class="text-gray-500">No new users are awaiting approval.</p>';
         } else {
@@ -1883,7 +1887,6 @@ async function renderUserManagementModal() {
             });
         }
 
-        // Render Active Users
         if (activeUsers.length === 0) {
             activeContainer.innerHTML = '<p class="text-gray-500">No other active users found.</p>';
         } else {
@@ -1911,7 +1914,6 @@ async function renderUserManagementModal() {
             });
         }
 
-        // Add event listeners after rendering
         document.querySelectorAll('.approve-user-btn').forEach(btn => btn.addEventListener('click', (e) => handleApprovalAction(e.target.dataset.uid, 'approved')));
         document.querySelectorAll('.deny-user-btn').forEach(btn => btn.addEventListener('click', (e) => handleApprovalAction(e.target.dataset.uid, 'denied')));
         document.querySelectorAll('.role-select').forEach(select => select.addEventListener('change', (e) => updateUserRole(e.target.dataset.uid, e.target.value)));
@@ -1929,11 +1931,11 @@ async function handleApprovalAction(userId, action) {
         const updateData = {
             status: action,
             approvedBy: appState.currentUser.email,
-            approvalTimestamp: firebase.firestore.FieldValue.serverTimestamp()
+            approvalTimestamp: serverTimestamp()
         };
         await saveDataToFirestore(`users/${userId}`, updateData);
         showToast(`User has been ${action}.`, 'success');
-        renderUserManagementModal(); // Refresh the list
+        renderUserManagementModal();
     } catch (error) {
         showToast("Failed to update user status.", "error");
     } finally {
@@ -1944,7 +1946,8 @@ async function handleApprovalAction(userId, action) {
 async function updateUserRole(uid, newRole) {
     setLoading(true, `Updating role to ${newRole}...`);
     try {
-        await db.collection('users').doc(uid).update({ role: newRole });
+        const userRef = doc(db, 'users', uid);
+        await updateDoc(userRef, { role: newRole });
         showToast("User role updated successfully.", "success");
     } catch (error) {
         console.error("Error updating role:", error);
@@ -1958,11 +1961,10 @@ async function deleteUser(uid, email) {
     showConfirmationModal('Delete User?', `Are you sure you want to delete the user ${email}? This will remove their access permanently.`, async () => {
         setLoading(true, `Deleting user ${email}...`);
         try {
-            // This only deletes the Firestore record, not the actual Firebase Auth user.
-            // A Cloud Function is required to delete the auth user securely.
-            await db.collection('users').doc(uid).delete();
+            const userRef = doc(db, 'users', uid);
+            await deleteDoc(userRef);
             showToast("User record deleted. They can no longer log in with a role.", "success");
-            renderUserManagementModal(); // Refresh the list
+            renderUserManagementModal();
         } catch (error) {
             console.error("Error deleting user record:", error);
             showToast("Failed to delete user record.", "error");
@@ -1974,7 +1976,8 @@ async function deleteUser(uid, email) {
 
 // --- Site Management ---
 async function loadSites() {
-    const sitesSnapshot = await db.collection('sites').get();
+    const sitesCollectionRef = collection(db, 'sites');
+    const sitesSnapshot = await getDocs(sitesCollectionRef);
     appState.sites = sitesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     
     const selector = getEl('site-selector');
@@ -2005,7 +2008,7 @@ async function createNewSite() {
         await saveDataToFirestore(`sites/${siteId}`, { name: siteName });
         input.value = '';
         showToast("Site created successfully!", "success");
-        await loadSites(); // Refresh site list
+        await loadSites();
         renderSiteManagementModal();
     } catch (error) {
         showToast("Error creating site.", "error");
@@ -2015,22 +2018,36 @@ async function createNewSite() {
 }
 
 async function deleteSite(siteId, siteName) {
-    showConfirmationModal('Delete Site?', `Are you sure you want to delete ${siteName}? All associated data will be permanently lost.`, async () => {
+    showConfirmationModal('Delete Site?', `Are you sure you want to delete ${siteName}? All associated data will be permanently lost. This action cannot be undone.`, async () => {
         setLoading(true, `Deleting site: ${siteName}...`);
         try {
-            await deleteDocument(`sites/${siteId}`);
-            // In a real-world app, a Cloud Function would be needed to delete all subcollections.
+            const user = auth.currentUser;
+            if (!user) throw new Error("Authentication required.");
+            
+            const token = await user.getIdToken();
+            const response = await fetch('/.netlify/functions/delete-site', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ siteId: siteId })
+            });
+
+            if (!response.ok) {
+                const errorResult = await response.json();
+                throw new Error(errorResult.error || 'Server failed to delete site.');
+            }
+
             showToast("Site deleted successfully.", "success");
             
-            // If the deleted site was the selected one, reset the selection.
             if (appState.selectedSiteId === siteId) {
                 appState.selectedSiteId = null;
             }
             
-            await loadSites(); // Refresh site list in the dropdown
-            renderSiteManagementModal(); // Re-render the modal list
+            await loadSites();
+            renderSiteManagementModal();
 
-            // If there are other sites, select the first one. Otherwise, clear the view.
             if (appState.sites.length > 0) {
                 const siteSelector = getEl('site-selector');
                 siteSelector.value = appState.sites[0].id;
@@ -2038,7 +2055,6 @@ async function deleteSite(siteId, siteName) {
                 await initializeFromStorage();
             } else {
                 appState.selectedSiteId = null;
-                // Clear the UI
                 getEl('visualization-container').innerHTML = '';
                 getEl('overview-controls').classList.add('hidden');
                 getEl('overviewSubtitle').textContent = 'No sites found. A manager must create a site to begin.';
@@ -2046,7 +2062,8 @@ async function deleteSite(siteId, siteName) {
                 updateUiForSiteSelection();
             }
         } catch (error) {
-            showToast("Error deleting site.", "error");
+            console.error("Error calling delete-site function:", error);
+            showToast(`Error deleting site: ${error.message}`, "error");
         } finally {
             setLoading(false);
         }
@@ -2084,7 +2101,7 @@ function renderSiteManagementModal() {
         el.className = 'flex justify-between items-center p-3 rounded-lg bg-gray-50 border';
         el.innerHTML = `
             <span class="font-semibold">${site.name}</span>
-            <button data-site-id="${site.id}" data-site-name="${site.name}" class="delete-site-btn text-red-500 hover:text-red-700">&times;</button>
+            <button data-site-id="${site.id}" data-site-name="${site.name}" class="delete-site-btn text-red-500 hover:text-red-700 font-bold text-lg">&times;</button>
         `;
         container.appendChild(el);
     });
@@ -2109,62 +2126,55 @@ document.addEventListener('DOMContentLoaded', function () {
     const userInfoDiv = getEl('user-info');
     const userEmailSpan = getEl('user-email');
 
-    // Auth Event Listeners
     getEl('login-btn').addEventListener('click', handleSignIn);
     getEl('google-login-btn').addEventListener('click', handleGoogleSignIn);
     getEl('signup-btn').addEventListener('click', handleSignUp);
     getEl('logout-btn').addEventListener('click', handleSignOut);
 
-    auth.onAuthStateChanged(async (user) => {
+    onAuthStateChanged(auth, async (user) => {
         if (user) {
-            // User is signed in. Let's verify their status.
             setLoading(true, 'Verifying user...');
-            const userRef = db.collection('users').doc(user.uid);
-            let userDoc = await userRef.get();
+            const userRef = doc(db, 'users', user.uid);
+            let userDoc = await getDoc(userRef);
             let userProfile;
 
-            if (!userDoc.exists) {
-                // This is a new user (likely from Google Sign-In or first-time email signup), create their profile.
-                const usersCollection = await db.collection('users').limit(1).get();
-                // The first user ever becomes a manager, all others are salesfloor by default.
+            if (!userDoc.exists()) {
+                const usersQuery = query(collection(db, "users"), limit(1));
+                const usersCollection = await getDocs(usersQuery);
                 const role = usersCollection.empty ? 'manager' : 'salesfloor';
                 
                 userProfile = {
                     email: user.email,
                     role: role,
-                    status: 'pending', // All new users must be approved
-                    requestTimestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                    status: 'pending',
+                    requestTimestamp: serverTimestamp(),
                     approvedBy: null,
                     approvalTimestamp: null,
                     homeSiteId: null
                 };
-                await userRef.set(userProfile);
+                await setDoc(userRef, userProfile);
                 showToast(`Account created! A manager must approve your account before you can log in.`, 'success');
             } else {
                 userProfile = userDoc.data();
             }
             
-            // Now, check the status of the profile we just fetched or created.
             if (userProfile.status === 'pending') {
                 showToast('Your account is awaiting approval from a manager.', 'info');
-                auth.signOut(); // This will re-trigger onAuthStateChanged with user=null.
-                return; // Stop execution here. The sign-out will handle the UI and loader.
+                signOut(auth);
+                return;
             }
             if (userProfile.status === 'denied') {
                 showToast('Your account request has been denied.', 'error');
-                auth.signOut(); // This will re-trigger onAuthStateChanged with user=null.
-                return; // Stop execution here.
+                signOut(auth);
+                return;
             }
 
-            // --- If we reach here, the user is approved and can log in ---
             appState.currentUser.uid = user.uid;
             appState.currentUser.email = user.email;
             appState.currentUser.role = userProfile.role;
             appState.currentUser.homeSiteId = userProfile.homeSiteId || null;
 
-            if(userEmailSpan) {
-                userEmailSpan.textContent = user.email;
-            }
+            if(userEmailSpan) userEmailSpan.textContent = user.email;
             userInfoDiv.classList.remove('hidden');
             
             authContainer.classList.add('hidden');
@@ -2175,24 +2185,21 @@ document.addEventListener('DOMContentLoaded', function () {
             await initializeAppForUser();
             checkFiles();
             renderUnslottedReport();
-            setLoading(false); // Only turn off loading for a successful, approved login
+            setLoading(false);
 
         } else {
-            // User is signed out.
             appState.currentUser = { uid: null, email: null, role: null, homeSiteId: null };
             authContainer.classList.remove('hidden');
             appContainer.classList.add('hidden');
             userInfoDiv.classList.add('hidden');
-            setLoading(false); // Make sure loading is off when on the login screen
+            setLoading(false);
         }
     });
     
-    // Moved initializeEventListeners out of onAuthStateChanged to prevent duplication
     initializeEventListeners();
 });
 
 function initializeEventListeners() {
-    // Event Listeners
     getEl('prevSlottingFile').addEventListener('change', (e) => handleFileChange(e, 'prevSlottingFileName'));
     getEl('inventoryFile').addEventListener('change', (e) => handleMultiFileChange(e, 'inventoryFileNames', 'clearInventoryBtn'));
     getEl('poFile').addEventListener('change', (e) => handleMultiFileChange(e, 'poFileNames', 'clearPOsBtn'));
@@ -2206,7 +2213,6 @@ function initializeEventListeners() {
     });
     getEl('downloadUnslottedBtn').addEventListener('click', downloadUnslottedCSV);
 
-
     getEl('search-btn').addEventListener('click', executeSearch);
     getEl('clearInventoryBtn').addEventListener('click', clearLoadedInventory);
     getEl('clearPOsBtn').addEventListener('click', clearLoadedPOs);
@@ -2214,18 +2220,14 @@ function initializeEventListeners() {
     getEl('add-cushion-level-btn').addEventListener('click', addCushionLevel);
     getEl('clearFiltersBtn').addEventListener('click', clearFilters);
 
-    // Filter dropdowns
     getEl('brand-filter').addEventListener('change', () => { updateFilterDropdowns(); renderUI(); });
     getEl('model-filter').addEventListener('change', () => { updateFilterDropdowns(); renderUI(); });
     getEl('color-filter').addEventListener('change', () => { updateFilterDropdowns(); renderUI(); });
     getEl('size-filter').addEventListener('change', () => { renderUI(); });
 
-
-    // Template downloads
     getEl('invTemplateBtn').addEventListener('click', (e) => { e.preventDefault(); downloadFile(`"System ID","UPC","EAN","Custom SKU","Manufact. SKU","Item","Remaining","total cost","avg. cost","sale price","margin"\n"ignore","ignore","ignore","ignore","ignore","Cloudsurfer | Undyed/White 11.5","2","ignore","ignore","ignore","ignore"`, 'inventory_template.csv'); });
     getEl('poTemplateBtn').addEventListener('click', (e) => { e.preventDefault(); downloadFile(`"System ID","Item","UPC","EAN","Custom SKU","Manufact. SKU","#","Vendor ID","special order qty","Retail price","Qty. On Hand","Qty. On Order","Desired Inventory Level","Order Qty"\n"ignore","Cloud 5 | Black/White 10.5","ignore","ignore","ignore","ignore","ignore","ignore","ignore","ignore","ignore","ignore","ignore","5"`, 'po_template.csv'); });
 
-    // Tab logic
     const tabs = document.querySelectorAll('.tab-button');
     const tabContents = document.querySelectorAll('.tab-content');
     tabs.forEach(tab => {
@@ -2242,7 +2244,6 @@ function initializeEventListeners() {
         });
     });
 
-    // Help dropdown logic
     const helpBtn = getEl('help-btn');
     const helpDropdown = getEl('help-dropdown');
     helpBtn.addEventListener('click', (e) => {
@@ -2250,7 +2251,6 @@ function initializeEventListeners() {
         helpDropdown.classList.toggle('hidden');
     });
 
-    // Settings Modal Logic
     const settingsModal = getEl('settings-modal');
     getEl('open-settings-btn').addEventListener('click', () => settingsModal.classList.add('visible'));
     getEl('close-settings-btn').addEventListener('click', () => settingsModal.classList.remove('visible'));
@@ -2259,10 +2259,9 @@ function initializeEventListeners() {
         settingsModal.classList.remove('visible');
     });
 
-    // User Management Modal Logic
     const userManagementModal = getEl('user-management-modal');
     getEl('open-user-management-btn').addEventListener('click', () => {
-        renderUserManagementModal(); // Re-fetch users every time it's opened
+        renderUserManagementModal();
         userManagementModal.classList.add('visible');
     });
     getEl('close-user-management-btn').addEventListener('click', () => userManagementModal.classList.remove('visible'));
@@ -2272,7 +2271,6 @@ function initializeEventListeners() {
         }
     });
 
-    // Site Management Modal Logic
     const siteManagementModal = getEl('site-management-modal');
     getEl('open-site-management-btn').addEventListener('click', () => {
         renderSiteManagementModal();
@@ -2291,8 +2289,6 @@ function initializeEventListeners() {
         initializeFromStorage();
     });
 
-
-    // Global click listener to close dropdowns/modals
     document.addEventListener('click', (e) => {
         if (helpDropdown && !helpDropdown.contains(e.target) && !helpBtn.contains(e.target)) {
             helpDropdown.classList.add('hidden');
@@ -2304,4 +2300,3 @@ function initializeEventListeners() {
         }
     });
 }
-// --- END: Main Execution ---

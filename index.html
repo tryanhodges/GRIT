@@ -455,12 +455,11 @@
     </div>
     <!-- END: Main App Container -->
     
-    <!-- Firebase SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.6.7/firebase-firestore-compat.js"></script>
-    <!-- REMOVED: firebase-functions-compat.js is no longer needed -->
-    
-    <script src="main.js" defer></script>
+    <!-- 
+      REMOVED: Old Firebase compat scripts.
+      The main.js file is now loaded as a module and will import the necessary
+      Firebase functions directly from the CDN.
+    -->
+    <script src="main.js" type="module"></script>
 </body>
 </html>
