@@ -77,12 +77,30 @@ export function generateCSV(slottedItems) {
 }
 
 /**
- * A simple CSV parser.
+ * A more robust CSV parser that handles quoted fields containing commas.
  * @param {string} csvText The CSV text to parse.
  * @returns {Array<Array<string>>}
  */
 export function robustCSVParse(csvText) {
-  return csvText.trim().split('\n').map(line => line.split(',').map(field => field.trim().replace(/"/g, '')));
+    const lines = csvText.trim().split('\n');
+    const result = [];
+    const regex = /(?:^|,)(\"(?:[^\"]+|\"\")*\"|[^,]*)/g;
+
+    for (const line of lines) {
+        if (!line.trim()) continue;
+        const columns = [];
+        let match;
+        while (match = regex.exec(line)) {
+            let column = match[1];
+            // Remove quotes and unescape double quotes
+            if (column.startsWith('"') && column.endsWith('"')) {
+                column = column.substring(1, column.length - 1).replace(/""/g, '"');
+            }
+            columns.push(column.trim());
+        }
+        result.push(columns);
+    }
+    return result;
 }
 
 /**
