@@ -11,7 +11,7 @@ import { db } from './firebase.js';
 import { serverTimestamp, collection, writeBatch, doc, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
 
 // API and Logic
-import { saveDataToFirestore, loadDataFromFirestore, deleteDocument, clearCollection } from './api.js';
+import { saveDataToFirestore, loadDataFromFirestore, deleteDocument, clearCollection, loadCollectionAsMap, batchSaveToCollection } from './api.js';
 import { runLocalSlottingAlgorithm, parsePOFiles, parseItemString } from './slotting.js';
 import { initializeAuthListener, handleGoogleSignIn, handleSignUp, handleSignIn, handleSignOut } from './auth.js';
 import { getEl, readFileAsText, downloadFile, generateUniqueFilename, generateCSV, toTitleCase, robustCSVParse, createHeaderMap } from './utils.js';
@@ -234,12 +234,11 @@ async function initializeAppForUser() {
     if (appState.sites.length > 0) {
         renderSiteSelector();
         
-        // MODIFICATION: Validate the site to select
         let siteToSelect = appState.currentUser.homeSiteId;
         const homeSiteExists = siteToSelect && appState.sites.some(site => site.id === siteToSelect);
 
         if (!homeSiteExists) {
-            siteToSelect = appState.sites[0].id; // Default to the first site if home site is invalid or not set
+            siteToSelect = appState.sites[0].id;
         }
 
         getEl('site-selector').value = siteToSelect;
@@ -260,17 +259,14 @@ async function initializeFromStorage() {
         return;
     }
     
-    // MODIFICATION: Make loading message more robust
     const siteSelector = getEl('site-selector');
     const selectedSiteName = siteSelector.options[siteSelector.selectedIndex]?.text || 'the selected site';
     setLoading(true, `Loading data for ${selectedSiteName}...`);
     
-    // Reset state for the new site
     appState.finalSlottedData = {};
     appState.unslottedItems = [];
     appState.exclusionKeywords = [];
     
-    // Define default settings
     const defaultSettings = {
         rackCount: 26, sectionsPerRack: 8, stacksPerSection: 5, slotsPerStack: 5,
         excludeRacks: '', includeKids: false, userInitials: '',
@@ -283,16 +279,16 @@ async function initializeFromStorage() {
         cushionIndicatorColor: '#6b7280'
     };
 
-    // Load site-specific and global data in parallel
-    const [storedSettings, slottingData, cushionData, poSnapshot, exclusionData] = await Promise.all([
+    // MODIFICATION: Load data using new scalable model
+    const [storedSettings, slottingData, unslottedData, cushionData, poSnapshot, exclusionData] = await Promise.all([
         loadDataFromFirestore(`sites/${appState.selectedSiteId}/configs/mainSettings`),
-        loadDataFromFirestore(`sites/${appState.selectedSiteId}/slotting/current`),
+        loadCollectionAsMap(`sites/${appState.selectedSiteId}/slotting`),
+        loadDataFromFirestore(`sites/${appState.selectedSiteId}/reports/unslotted`),
         loadDataFromFirestore('configs/cushionData'),
         getDocs(collection(db, `sites/${appState.selectedSiteId}/purchaseOrders`)),
         loadDataFromFirestore(`sites/${appState.selectedSiteId}/configs/exclusionKeywords`)
     ]);
 
-    // Apply settings
     const finalSettings = { ...defaultSettings, ...storedSettings };
     Object.keys(finalSettings).forEach(key => {
         const el = getEl(key);
@@ -301,7 +297,6 @@ async function initializeFromStorage() {
             else el.value = finalSettings[key];
         }
     });
-    // Apply color settings
     Object.keys(finalSettings.colorMap).forEach(key => {
         const deptName = finalSettings.colorMap[key].name;
         const onHandEl = getEl(`color${deptName}`);
@@ -311,12 +306,11 @@ async function initializeFromStorage() {
     });
     getEl('colorCushion').value = finalSettings.cushionIndicatorColor;
 
-    // Update app state from loaded data
     appState.userInitials = finalSettings.userInitials;
     appState.colorMap = finalSettings.colorMap;
     appState.cushionIndicatorColor = finalSettings.cushionIndicatorColor;
-    appState.finalSlottedData = slottingData?.data || {};
-    appState.unslottedItems = slottingData?.unslotted || [];
+    appState.finalSlottedData = slottingData || {};
+    appState.unslottedItems = unslottedData?.items || [];
     appState.cushionLevels = cushionData?.levels || [];
     appState.modelCushionAssignments = cushionData?.assignments || {};
     appState.allKnownModels = cushionData?.models || [];
@@ -324,7 +318,6 @@ async function initializeFromStorage() {
     poSnapshot.forEach(doc => { appState.loadedPOs[doc.id] = doc.data(); });
     appState.exclusionKeywords = exclusionData?.keywords || [];
     
-    // Render all UI components with the new state
     renderExclusionList();
     renderCushionUI();
     renderUI();
@@ -369,7 +362,7 @@ function handleMultiFileChange(event, nameContainerId, clearButtonId, type) {
 
 function clearLoadedInventory() {
     getEl('inventoryFile').value = '';
-    appState.rawInventoryFiles = []; // Clear state
+    appState.rawInventoryFiles = [];
     getEl('inventoryFileNames').textContent = 'No files chosen...';
     getEl('clearInventoryBtn').classList.add('hidden');
     checkFiles();
@@ -378,7 +371,7 @@ function clearLoadedInventory() {
 
 function clearLoadedPOs() {
     getEl('poFile').value = '';
-    appState.rawPOFiles = []; // Clear state
+    appState.rawPOFiles = [];
     getEl('poFileNames').textContent = 'No files chosen...';
     getEl('clearPOsBtn').classList.add('hidden');
     checkFiles();
@@ -448,13 +441,17 @@ async function runSlottingProcess() {
         appState.finalSlottedData = result.finalSlottedData;
         appState.unslottedItems = result.unslottedItems;
 
-        const slottingResults = {
-            data: appState.finalSlottedData,
-            unslotted: appState.unslottedItems,
+        // MODIFICATION: Save data using new scalable model
+        const slottingCollectionPath = `sites/${appState.selectedSiteId}/slotting`;
+        await clearCollection(slottingCollectionPath);
+        await batchSaveToCollection(slottingCollectionPath, appState.finalSlottedData);
+        
+        const unslottedReport = {
+            items: appState.unslottedItems,
             lastUpdated: serverTimestamp(),
             updatedBy: appState.currentUser.email
         };
-        await saveDataToFirestore(`sites/${appState.selectedSiteId}/slotting/current`, slottingResults);
+        await saveDataToFirestore(`sites/${appState.selectedSiteId}/reports/unslotted`, unslottedReport, false);
 
         const batch = writeBatch(db);
         Object.entries(appState.loadedPOs).forEach(([poKey, po]) => {
@@ -519,8 +516,8 @@ function clearFilters() {
     getEl('size-filter').value = '';
     getEl('searchInput').value = '';
 
-    updateFilterDropdowns(); // Reset dependent dropdowns
-    renderUI(); // Re-render with no filters
+    updateFilterDropdowns();
+    renderUI();
     showToast('Filters cleared.', 'info');
 }
 
@@ -640,7 +637,7 @@ async function handleCushionModelUpload(event) {
     updateModelAssignmentList();
     setLoading(false);
     showToast(`${newModelsFound} new models added to the assignment list.`, 'success');
-    getEl('cushionModelFile').value = ''; // Clear file input
+    getEl('cushionModelFile').value = '';
 }
 
 async function clearCushionData() {
@@ -667,16 +664,16 @@ async function clearSiteSlottingData() {
         appState.unslottedItems = [];
         appState.loadedPOs = {};
         
+        await clearCollection(`sites/${appState.selectedSiteId}/slotting`);
         await clearCollection(`sites/${appState.selectedSiteId}/purchaseOrders`);
-        await deleteDocument(`sites/${appState.selectedSiteId}/slotting/current`);
+        await deleteDocument(`sites/${appState.selectedSiteId}/reports/unslotted`);
         
-        await initializeFromStorage(); // Reload to reflect cleared state
+        await initializeFromStorage();
         setLoading(false);
         showToast(`PO and Inventory data for the site has been cleared.`, 'success');
     });
 }
 
-// Functions that were missing from the previous response but are called from event listeners
 async function loadSites() {
     const sitesCollectionRef = collection(db, 'sites');
     const sitesSnapshot = await getDocs(sitesCollectionRef);
@@ -712,12 +709,11 @@ async function deleteSite(siteId, siteName) {
     showConfirmationModal(`Delete ${siteName}?`, 'This will permanently delete the site and all its associated data (settings, slotting, POs). This action cannot be undone.', async () => {
         setLoading(true, `Deleting site: ${siteName}`);
         try {
-            // This is a simplified deletion. A robust solution would use a Cloud Function
-            // to recursively delete all subcollections.
+            await clearCollection(`sites/${siteId}/slotting`);
+            await clearCollection(`sites/${siteId}/purchaseOrders`);
             await deleteDocument(`sites/${siteId}/configs/mainSettings`);
             await deleteDocument(`sites/${siteId}/configs/exclusionKeywords`);
-            await deleteDocument(`sites/${siteId}/slotting/current`);
-            await clearCollection(`sites/${siteId}/purchaseOrders`);
+            await deleteDocument(`sites/${siteId}/reports/unslotted`);
             await deleteDocument(`sites/${siteId}`);
 
             await loadSites();
@@ -895,7 +891,8 @@ async function handleDrop(e) {
             
             // Re-render and save
             renderUI();
-            await saveDataToFirestore(`sites/${appState.selectedSiteId}/slotting/current`, { data: appState.finalSlottedData });
+            await saveDataToFirestore(`sites/${appState.selectedSiteId}/slotting/${draggedLocationId}`, item2 || null, false);
+            await saveDataToFirestore(`sites/${appState.selectedSiteId}/slotting/${targetLocationId}`, item1, false);
             showToast('Items swapped.', 'success');
         }
     }
