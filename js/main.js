@@ -39,7 +39,7 @@ function initializeEventListeners() {
     getEl('signup-btn').addEventListener('click', handleSignUp);
     getEl('logout-btn').addEventListener('click', handleSignOut);
 
-    // MODIFIED: Listen for custom event to initialize the app
+    // Listen for custom event to initialize the app
     document.addEventListener('user-authenticated', initializeAppForUser);
 
     // File Inputs
@@ -47,7 +47,6 @@ function initializeEventListeners() {
     getEl('inventoryFile').addEventListener('change', (e) => handleMultiFileChange(e, 'inventoryFileNames', 'clearInventoryBtn', 'inventory'));
     getEl('poFile').addEventListener('change', (e) => {
         handleMultiFileChange(e, 'poFileNames', 'clearPOsBtn', 'po');
-        // We still parse here to give the user immediate feedback in the UI
         parsePOFiles(e.target.files).then(() => renderPODetails());
     });
     getEl('cushionModelFile').addEventListener('change', handleCushionModelUpload);
@@ -62,7 +61,7 @@ function initializeEventListeners() {
     });
     getEl('downloadUnslottedBtn').addEventListener('click', downloadUnslottedCSV);
 
-    // MODIFIED: Search and Filters now just trigger a re-render
+    // Search and Filters now just trigger a re-render
     getEl('search-btn').addEventListener('click', renderUI);
     getEl('clearFiltersBtn').addEventListener('click', clearFilters);
     getEl('brand-filter').addEventListener('change', () => { updateFilterDropdowns(); renderUI(); });
@@ -234,7 +233,15 @@ async function initializeAppForUser() {
     await loadSites();
     if (appState.sites.length > 0) {
         renderSiteSelector();
-        const siteToSelect = appState.currentUser.homeSiteId || appState.sites[0].id;
+        
+        // MODIFICATION: Validate the site to select
+        let siteToSelect = appState.currentUser.homeSiteId;
+        const homeSiteExists = siteToSelect && appState.sites.some(site => site.id === siteToSelect);
+
+        if (!homeSiteExists) {
+            siteToSelect = appState.sites[0].id; // Default to the first site if home site is invalid or not set
+        }
+
         getEl('site-selector').value = siteToSelect;
         appState.selectedSiteId = siteToSelect;
         await initializeFromStorage();
@@ -252,7 +259,11 @@ async function initializeFromStorage() {
         updateUiForSiteSelection();
         return;
     }
-    setLoading(true, `Loading data for ${getEl('site-selector').options[getEl('site-selector').selectedIndex].text}...`);
+    
+    // MODIFICATION: Make loading message more robust
+    const siteSelector = getEl('site-selector');
+    const selectedSiteName = siteSelector.options[siteSelector.selectedIndex]?.text || 'the selected site';
+    setLoading(true, `Loading data for ${selectedSiteName}...`);
     
     // Reset state for the new site
     appState.finalSlottedData = {};
@@ -292,8 +303,9 @@ async function initializeFromStorage() {
     });
     // Apply color settings
     Object.keys(finalSettings.colorMap).forEach(key => {
-        const onHandEl = getEl(`color${toTitleCase(finalSettings.colorMap[key].name)}`);
-        const poEl = getEl(`color${toTitleCase(finalSettings.colorMap[key].name)}PO`);
+        const deptName = finalSettings.colorMap[key].name;
+        const onHandEl = getEl(`color${deptName}`);
+        const poEl = getEl(`color${deptName}PO`);
         if (onHandEl) onHandEl.value = finalSettings.colorMap[key].onHand;
         if (poEl) poEl.value = finalSettings.colorMap[key].po;
     });
@@ -342,7 +354,6 @@ function handleMultiFileChange(event, nameContainerId, clearButtonId, type) {
     const files = event.target.files;
     const fileNamesContainer = getEl(nameContainerId);
 
-    // MODIFIED: Store raw files in state
     if (type === 'inventory') appState.rawInventoryFiles = Array.from(files);
     if (type === 'po') appState.rawPOFiles = Array.from(files);
 
@@ -387,7 +398,6 @@ async function runSlottingProcess() {
     setLoading(true, 'Preparing data for processing...');
 
     try {
-        // MODIFIED: Use files from state instead of reading from DOM
         const inventoryFiles = appState.rawInventoryFiles;
         const poFiles = appState.rawPOFiles;
         const prevSlottingFile = getEl('prevSlottingFile').files[0];
@@ -502,7 +512,6 @@ function downloadUnslottedCSV() {
     downloadFile(csv, 'unslotted_items.csv');
 }
 
-// MODIFIED: Clear filters now just resets inputs and re-renders
 function clearFilters() {
     getEl('brand-filter').value = '';
     getEl('model-filter').value = '';

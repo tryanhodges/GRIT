@@ -22,7 +22,7 @@ export const appState = {
     unslottedItems: [],
     loadedPOs: {},
     
-    // MODIFIED: Store raw file objects to avoid re-reading from DOM
+    // Store raw file objects to avoid re-reading from DOM
     rawInventoryFiles: [],
     rawPOFiles: [],
 

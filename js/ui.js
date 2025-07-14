@@ -69,7 +69,7 @@ export function showConfirmationModal(title, message, onConfirm) {
 // --- Main Rendering Functions ---
 
 export function renderUI() {
-    // MODIFIED: Moved search/filter logic here from main.js
+    // Moved search/filter logic here from main.js
     const searchTerm = getEl('searchInput')?.value.toLowerCase().trim() || '';
     const brandFilter = getEl('brand-filter').value;
     const modelFilter = getEl('model-filter').value;
