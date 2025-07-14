@@ -69,7 +69,6 @@ export function showConfirmationModal(title, message, onConfirm) {
 // --- Main Rendering Functions ---
 
 export function renderUI() {
-    // Moved search/filter logic here from main.js
     const searchTerm = getEl('searchInput')?.value.toLowerCase().trim() || '';
     const brandFilter = getEl('brand-filter').value;
     const modelFilter = getEl('model-filter').value;
@@ -163,7 +162,10 @@ export function renderGridView(container, totalRacks, isFiltering, matchingSlots
                         slotEl.style.backgroundColor = color;
                         slotEl.style.borderColor = colorInfo.onHand;
                     }
-                    if (matchingSlots.has(locationId)) slotEl.classList.add('highlight-grid');
+                    // MODIFICATION: Only highlight if filtering
+                    if (isFiltering && matchingSlots.has(locationId)) {
+                        slotEl.classList.add('highlight-grid');
+                    }
                     stackEl.appendChild(slotEl);
                 }
                 sectionEl.appendChild(stackEl);
@@ -173,7 +175,7 @@ export function renderGridView(container, totalRacks, isFiltering, matchingSlots
         container.appendChild(rackEl);
     }
     if (isFiltering && racksFound === 0) container.innerHTML = `<p class="text-gray-500 text-center col-span-full">No items found matching the current filters.</p>`;
-    else if (!isFiltering && racksFound === 0) container.innerHTML = `<p class="text-gray-500 text-center col-span-full">No items have been slotted for this site yet.</p>`;
+    else if (!isFiltering && Object.keys(appState.finalSlottedData).length === 0) container.innerHTML = `<p class="text-gray-500 text-center col-span-full">No items have been slotted for this site yet.</p>`;
 }
 
 export function renderDetailView(container, totalRacks, isFiltering, matchingSlots, matchingRacks) {
@@ -266,7 +268,10 @@ export function renderDetailView(container, totalRacks, isFiltering, matchingSlo
                         slotEl.innerHTML = `<span class="text-gray-400 text-xs">${locationId}</span>`;
                     }
 
-                    if (matchingSlots.has(locationId)) slotEl.classList.add('highlight-detail');
+                    // MODIFICATION: Only highlight if filtering
+                    if (isFiltering && matchingSlots.has(locationId)) {
+                        slotEl.classList.add('highlight-detail');
+                    }
                     stackEl.appendChild(slotEl);
                 }
                 sectionEl.appendChild(stackEl);
