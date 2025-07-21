@@ -39,7 +39,6 @@ function initializeEventListeners() {
     getEl('signup-btn').addEventListener('click', handleSignUp);
     getEl('logout-btn').addEventListener('click', handleSignOut);
 
-    // Listen for custom event to initialize the app
     document.addEventListener('user-authenticated', initializeAppForUser);
 
     // File Inputs
@@ -61,7 +60,6 @@ function initializeEventListeners() {
     });
     getEl('downloadUnslottedBtn').addEventListener('click', downloadUnslottedCSV);
 
-    // Search and Filters now just trigger a re-render
     getEl('search-btn').addEventListener('click', renderUI);
     getEl('clearFiltersBtn').addEventListener('click', clearFilters);
     getEl('brand-filter').addEventListener('change', () => { updateFilterDropdowns(); renderUI(); });
@@ -72,27 +70,18 @@ function initializeEventListeners() {
         if (e.key === 'Enter') renderUI();
     });
 
-
-    // Clear Buttons
     getEl('clearInventoryBtn').addEventListener('click', clearLoadedInventory);
     getEl('clearPOsBtn').addEventListener('click', clearLoadedPOs);
-
-    // Exclusions
     getEl('add-exclusion-btn').addEventListener('click', addExclusionKeyword);
-
-    // Cushioning
     getEl('add-cushion-level-btn').addEventListener('click', addCushionLevel);
 
-    // Templates
     getEl('invTemplateBtn').addEventListener('click', (e) => { e.preventDefault(); downloadFile(`"System ID","UPC","EAN","Custom SKU","Manufact. SKU","Item","Remaining","total cost","avg. cost","sale price","margin"\n"ignore","ignore","ignore","ignore","ignore","Cloudsurfer | Undyed/White 11.5","2","ignore","ignore","ignore","ignore"`, 'inventory_template.csv'); });
     getEl('poTemplateBtn').addEventListener('click', (e) => { e.preventDefault(); downloadFile(`"PO Number","Item","Quantity","Checked In"\n"12345","Cloud 5 | Black/White 10.5","5","0"`, 'po_template.csv'); });
 
-    // Modals
     initializeModal('settings-modal', 'open-settings-btn', 'close-settings-btn');
     initializeModal('user-management-modal', 'open-user-management-btn', 'close-user-management-btn', renderUserManagementModal);
     initializeModal('site-management-modal', 'open-site-management-btn', 'close-site-management-btn', renderSiteManagementModal);
     
-    // Settings Actions
     getEl('save-settings-btn').addEventListener('click', () => {
         saveSettings();
         getEl('settings-modal').classList.remove('visible');
@@ -100,7 +89,6 @@ function initializeEventListeners() {
     getEl('clear-cushion-data-btn').addEventListener('click', clearCushionData);
     getEl('clear-site-slotting-data-btn').addEventListener('click', clearSiteSlottingData);
 
-    // Site Management
     getEl('create-site-btn').addEventListener('click', createNewSite);
     getEl('set-home-site-btn').addEventListener('click', setHomeSite);
     getEl('site-selector').addEventListener('change', (e) => {
@@ -108,7 +96,6 @@ function initializeEventListeners() {
         initializeFromStorage();
     });
 
-    // Help Dropdown
     const helpBtn = getEl('help-btn');
     const helpDropdown = getEl('help-dropdown');
     helpBtn.addEventListener('click', (e) => {
@@ -121,7 +108,6 @@ function initializeEventListeners() {
         }
     });
 
-    // Tab logic
     const tabs = document.querySelectorAll('.tab-button');
     const tabContents = document.querySelectorAll('.tab-content');
     tabs.forEach(tab => {
@@ -138,7 +124,6 @@ function initializeEventListeners() {
         });
     });
 
-    // Event Delegation for dynamic elements
     document.body.addEventListener('click', (e) => {
         const target = e.target;
         const action = target.dataset.action || target.closest('[data-action]')?.dataset.action;
@@ -279,7 +264,6 @@ async function initializeFromStorage() {
         cushionIndicatorColor: '#6b7280'
     };
 
-    // MODIFICATION: Load data using new scalable model
     const [storedSettings, slottingData, unslottedData, cushionData, poSnapshot, exclusionData] = await Promise.all([
         loadDataFromFirestore(`sites/${appState.selectedSiteId}/configs/mainSettings`),
         loadCollectionAsMap(`sites/${appState.selectedSiteId}/slotting`),
@@ -416,11 +400,16 @@ async function runSlottingProcess() {
         await parsePOFiles(poFiles);
 
         setLoading(true, 'Processing... This may take a moment.');
+        
+        // MODIFICATION: Check the new checkbox
+        const clearInventory = getEl('clear-inventory-checkbox').checked;
+        const existingBackroom = clearInventory ? {} : { ...appState.finalSlottedData };
 
         const result = runLocalSlottingAlgorithm({
             inventoryData,
             poData,
-            previousSlottingData,
+            previousSlottingData: clearInventory ? previousSlottingData : null, // Only use previous slotting if clearing
+            existingBackroom, // Pass current state if not clearing
             settings: {
                 rackCount: getEl('rackCount').value,
                 sectionsPerRack: getEl('sectionsPerRack').value,
@@ -441,9 +430,10 @@ async function runSlottingProcess() {
         appState.finalSlottedData = result.finalSlottedData;
         appState.unslottedItems = result.unslottedItems;
 
-        // MODIFICATION: Save data using new scalable model
         const slottingCollectionPath = `sites/${appState.selectedSiteId}/slotting`;
-        await clearCollection(slottingCollectionPath);
+        if (clearInventory) {
+            await clearCollection(slottingCollectionPath);
+        }
         await batchSaveToCollection(slottingCollectionPath, appState.finalSlottedData);
         
         const unslottedReport = {
@@ -879,20 +869,23 @@ async function handleDrop(e) {
             const item1 = appState.finalSlottedData[draggedLocationId];
             const item2 = appState.finalSlottedData[targetLocationId];
             
-            // Swap items in the state
+            const batch = writeBatch(db);
+
             if (item2) {
                 appState.finalSlottedData[draggedLocationId] = item2;
                 item2.LocationID = draggedLocationId;
+                batch.set(doc(db, `sites/${appState.selectedSiteId}/slotting/${draggedLocationId}`), item2);
             } else {
                 delete appState.finalSlottedData[draggedLocationId];
+                batch.delete(doc(db, `sites/${appState.selectedSiteId}/slotting/${draggedLocationId}`));
             }
+            
             appState.finalSlottedData[targetLocationId] = item1;
             item1.LocationID = targetLocationId;
+            batch.set(doc(db, `sites/${appState.selectedSiteId}/slotting/${targetLocationId}`), item1);
             
-            // Re-render and save
             renderUI();
-            await saveDataToFirestore(`sites/${appState.selectedSiteId}/slotting/${draggedLocationId}`, item2 || null, false);
-            await saveDataToFirestore(`sites/${appState.selectedSiteId}/slotting/${targetLocationId}`, item1, false);
+            await batch.commit();
             showToast('Items swapped.', 'success');
         }
     }
@@ -905,7 +898,6 @@ async function handleCushionLevelDrop(e, draggedLevel) {
         const draggedIndex = appState.cushionLevels.indexOf(draggedLevel);
         const targetIndex = appState.cushionLevels.indexOf(targetLevel);
         if (draggedIndex > -1 && targetIndex > -1) {
-            // Remove and insert to reorder
             const [removed] = appState.cushionLevels.splice(draggedIndex, 1);
             appState.cushionLevels.splice(targetIndex, 0, removed);
             

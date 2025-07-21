@@ -18,7 +18,6 @@ export function parseItemString(itemString, brand = '') {
     let cleanItemString = itemString ? itemString.trim() : '';
     if (!cleanItemString) return { Model: 'N/A', Color: 'N/A', Size: 'N/A', Sex: sex };
 
-    // BROOKS-specific logic
     if (brand.toUpperCase() === 'BROOKS') {
         const brooksRegex = /^(.*?)\s+(\d{3})\s+(.*)$/;
         const match = cleanItemString.match(brooksRegex);
@@ -80,7 +79,6 @@ export async function parsePOFiles(fileList) {
 
         const headerMap = createHeaderMap(lines[0]);
         const itemIndex = headerMap.get('item');
-        // MODIFICATION: Look for new column headers
         const qtyIndex = headerMap.get('order qty.');
         const checkedInIndex = headerMap.get('qty. on hand');
 
@@ -127,7 +125,6 @@ export async function parsePOFiles(fileList) {
                 items: poItems
             };
         } else {
-            // If a file is re-uploaded and now has 0 items, remove it
             delete appState.loadedPOs[poKey];
         }
     }
@@ -143,14 +140,16 @@ export function runLocalSlottingAlgorithm(data) {
         inventoryData = [],
         poData = [],
         previousSlottingData = null,
+        existingBackroom = {}, // MODIFICATION: Accept existing backroom data
         settings = {},
         cushionData = { levels: [], assignments: {} },
         exclusionKeywords = []
     } = data;
 
-    // 1. Process Previous Slotting Data
-    let existingBackroom = {};
-    if (previousSlottingData) {
+    // MODIFICATION: If not starting clean, use the provided existingBackroom data.
+    // Otherwise, parse the previousSlottingFile if it exists.
+    let backroom = { ...existingBackroom };
+    if (Object.keys(existingBackroom).length === 0 && previousSlottingData) {
         const lines = robustCSVParse(previousSlottingData);
         if (lines.length > 1) {
             const headerMap = createHeaderMap(lines[0]);
@@ -166,7 +165,7 @@ export function runLocalSlottingAlgorithm(data) {
                     if (!locationId) continue;
                     const originalString = cols[itemStringIndex];
                     const { Model, Color, Size, Sex } = parseItemString(originalString, cols[brandIndex]);
-                    existingBackroom[locationId] = {
+                    backroom[locationId] = {
                         UniqueID: `${cols[brandIndex]}-${Model}-${Color}-${Size}-${i}`,
                         Brand: cols[brandIndex], Model, Color, Size, Sex,
                         Type: cols[typeIndex], OriginalItemString: originalString
@@ -176,7 +175,6 @@ export function runLocalSlottingAlgorithm(data) {
         }
     }
 
-    // 2. Process Inventory Files
     let allInventoryItems = [];
     inventoryData.forEach(invFile => {
         const brand = invFile.brand;
@@ -207,7 +205,6 @@ export function runLocalSlottingAlgorithm(data) {
         }
     });
 
-    // 3. Process PO Files
     let allPoItems = [];
     poData.forEach(poFile => {
         const brand = poFile.brand;
@@ -216,7 +213,6 @@ export function runLocalSlottingAlgorithm(data) {
 
         const headerMap = createHeaderMap(lines[0]);
         const itemIndex = headerMap.get('item');
-        // MODIFICATION: Look for new column headers
         const qtyIndex = headerMap.get('order qty.');
         const checkedInIndex = headerMap.get('qty. on hand');
 
@@ -247,18 +243,19 @@ export function runLocalSlottingAlgorithm(data) {
         }
     });
     
-    // 4. Reconcile and Sort
-    const reconciledBackroom = {};
-    const alreadyPlacedUniqueIDs = new Set();
+    const alreadyPlacedUniqueIDs = new Set(Object.values(backroom).map(item => item.UniqueID));
     const currentInventoryMap = new Map(allInventoryItems.map(item => [item.UniqueID, item]));
 
-    Object.entries(existingBackroom).forEach(([locationId, item]) => {
-        if (currentInventoryMap.has(item.UniqueID)) {
-            reconciledBackroom[locationId] = currentInventoryMap.get(item.UniqueID);
-            alreadyPlacedUniqueIDs.add(item.UniqueID);
-        }
-    });
-
+    // If we are in additive mode, we need to reconcile the existing data with the new inventory files
+    if (Object.keys(existingBackroom).length > 0) {
+        Object.keys(backroom).forEach(locationId => {
+            const item = backroom[locationId];
+            if (item.Type === 'Inventory' && !currentInventoryMap.has(item.UniqueID)) {
+                delete backroom[locationId]; // Remove item if it's no longer in the inventory files
+            }
+        });
+    }
+    
     const newInventoryItems = allInventoryItems.filter(item => !alreadyPlacedUniqueIDs.has(item.UniqueID));
     let itemsToSlot = [...newInventoryItems, ...allPoItems];
     
@@ -288,12 +285,10 @@ export function runLocalSlottingAlgorithm(data) {
         return a.Size.localeCompare(b.Size);
     });
 
-    // 5. Generate Slotting
     const { rackCount, sectionsPerRack, stacksPerSection, slotsPerStack, excludeRacks } = settings;
     const excludedRacksArr = excludeRacks.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
-    const backroom = { ...reconciledBackroom };
     const rackAssignments = {};
-    Object.entries(reconciledBackroom).forEach(([locationId, item]) => {
+    Object.entries(backroom).forEach(([locationId, item]) => {
         const [rackId] = locationId.split('-');
         if (!rackAssignments[rackId]) {
             rackAssignments[rackId] = { sex: item.Sex, brand: item.Brand };
