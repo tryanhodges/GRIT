@@ -67,7 +67,7 @@ export function generateUniqueFilename(baseName, userInitials) {
  * @returns {string}
  */
 export function generateCSV(slottedItems) {
-    // MODIFICATION: Use \r\n for better compatibility with Excel
+    // Use \r\n for better compatibility with Excel
     let csv = "UniqueID,Brand,Model,Size,Color,LocationID,Type,Sex,OriginalItemString\r\n";
     Object.entries(slottedItems)
         .sort(([locA], [locB]) => locA.localeCompare(locB, undefined, {numeric: true}))
@@ -90,8 +90,8 @@ export function robustCSVParse(csvText) {
     
     csvText = csvText.replace(/[\u201C\u201D\u201E]/g, '"');
 
-    // MODIFICATION: Normalize all line endings to \n before splitting
-    const lines = csvText.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    // MODIFICATION: Use a more robust method for splitting lines to prevent RangeError.
+    const lines = csvText.trim().split(/\r?\n/);
     
     const result = [];
     const regex = /(?:^|,)(\"(?:[^\"]+|\"\")*\"|[^,]*)/g;
