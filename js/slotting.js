@@ -80,11 +80,12 @@ export async function parsePOFiles(fileList) {
 
         const headerMap = createHeaderMap(lines[0]);
         const itemIndex = headerMap.get('item');
-        const qtyIndex = headerMap.get('quantity');
-        const checkedInIndex = headerMap.get('checked in');
+        // MODIFICATION: Look for new column headers
+        const qtyIndex = headerMap.get('order qty.');
+        const checkedInIndex = headerMap.get('qty. on hand');
 
         if (itemIndex === undefined || qtyIndex === undefined || checkedInIndex === undefined) {
-            showToast(`Skipping ${file.name}: Missing 'Item', 'Quantity', or 'Checked In' column.`, "error");
+            showToast(`Skipping ${file.name}: Missing 'Item', 'Order Qty.', or 'Qty. On Hand' column.`, "error");
             continue;
         }
 
@@ -215,11 +216,12 @@ export function runLocalSlottingAlgorithm(data) {
 
         const headerMap = createHeaderMap(lines[0]);
         const itemIndex = headerMap.get('item');
-        const qtyIndex = headerMap.get('quantity');
-        const checkedInIndex = headerMap.get('checked in');
+        // MODIFICATION: Look for new column headers
+        const qtyIndex = headerMap.get('order qty.');
+        const checkedInIndex = headerMap.get('qty. on hand');
 
         if (itemIndex === undefined || qtyIndex === undefined || checkedInIndex === undefined) {
-             console.warn(`Skipping PO file ${poFile.name}: Missing 'Item', 'Quantity', or 'Checked In' column.`);
+             console.warn(`Skipping PO file ${poFile.name}: Missing 'Item', 'Order Qty.', or 'Qty. On Hand' column.`);
              return;
         }
 
