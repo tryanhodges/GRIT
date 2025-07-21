@@ -84,33 +84,69 @@ export function generateCSV(slottedItems) {
  * @returns {Array<Array<string>>}
  */
 export function robustCSVParse(csvText) {
+    // Sanitize input text first
     if (csvText.charCodeAt(0) === 0xFEFF) {
-        csvText = csvText.slice(1);
+        csvText = csvText.slice(1); // Remove BOM
     }
-    
-    csvText = csvText.replace(/[\u201C\u201D\u201E]/g, '"');
+    csvText = csvText.replace(/[\u201C\u201D\u201E]/g, '"'); // Normalize smart quotes
+    csvText = csvText.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n'); // Normalize line endings
 
-    // MODIFICATION: Use a more robust method for splitting lines to prevent RangeError.
-    const lines = csvText.trim().split(/\r?\n/);
-    
     const result = [];
-    const regex = /(?:^|,)(\"(?:[^\"]+|\"\")*\"|[^,]*)/g;
+    let currentRow = [];
+    let currentField = '';
+    let inQuotedField = false;
 
-    for (const line of lines) {
-        if (!line.trim()) continue;
-        const columns = [];
-        let match;
-        while (match = regex.exec(line)) {
-            let column = match[1];
-            if (column.startsWith('"') && column.endsWith('"')) {
-                column = column.substring(1, column.length - 1).replace(/""/g, '"');
+    for (let i = 0; i < csvText.length; i++) {
+        const char = csvText[i];
+
+        if (inQuotedField) {
+            if (char === '"') {
+                // Check for an escaped quote ("")
+                if (i + 1 < csvText.length && csvText[i + 1] === '"') {
+                    currentField += '"';
+                    i++; // Skip the next quote
+                } else {
+                    inQuotedField = false; // End of quoted field
+                }
+            } else {
+                currentField += char; // Character inside a quoted field
             }
-            columns.push(column.trim());
+        } else {
+            switch (char) {
+                case ',':
+                    currentRow.push(currentField);
+                    currentField = '';
+                    break;
+                case '\n':
+                    currentRow.push(currentField);
+                    result.push(currentRow);
+                    currentRow = [];
+                    currentField = '';
+                    break;
+                case '"':
+                    // A quote signifies the start of a quoted field only if the field is currently empty
+                    if (currentField === '') {
+                        inQuotedField = true;
+                    } else {
+                        currentField += char; // Treat as a normal character if field is not empty
+                    }
+                    break;
+                default:
+                    currentField += char;
+            }
         }
-        result.push(columns);
     }
-    return result;
+
+    // Add the last field and row if the file doesn't end with a newline
+    if (currentField || currentRow.length > 0) {
+        currentRow.push(currentField);
+        result.push(currentRow);
+    }
+    
+    // Filter out any completely empty rows that might have been created by trailing newlines
+    return result.filter(row => row.length > 1 || (row.length === 1 && row[0] !== ''));
 }
+
 
 /**
  * Creates a map of CSV headers to their column index.
@@ -119,6 +155,7 @@ export function robustCSVParse(csvText) {
  */
 export function createHeaderMap(headerRow) {
   const map = new Map();
+  if (!headerRow) return map;
   headerRow.forEach((header, index) => {
     map.set(header.toLowerCase().trim().replace(/"/g, ''), index);
   });
