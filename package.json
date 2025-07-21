@@ -1,8 +1,0 @@
-{
-  "name": "grit-inventory-tool",
-  "version": "1.0.0",
-  "dependencies": {
-    "firebase-admin": "^10.0.2",
-    "cors": "^2.8.5"
-  }
-}
