@@ -67,13 +67,13 @@ export function generateUniqueFilename(baseName, userInitials) {
  * @returns {string}
  */
 export function generateCSV(slottedItems) {
-    let csv = "UniqueID,Brand,Model,Size,Color,LocationID,Type,Sex,OriginalItemString\n";
+    // MODIFICATION: Use \r\n for better compatibility with Excel
+    let csv = "UniqueID,Brand,Model,Size,Color,LocationID,Type,Sex,OriginalItemString\r\n";
     Object.entries(slottedItems)
         .sort(([locA], [locB]) => locA.localeCompare(locB, undefined, {numeric: true}))
         .forEach(([loc, item]) => {
-            // Ensure OriginalItemString is properly quoted to handle commas
             const originalItemString = `"${(item.OriginalItemString || '').replace(/"/g, '""')}"`;
-            csv += `"${item.UniqueID||''}","${item.Brand||''}","${item.Model||''}","${item.Size||''}","${item.Color||''}",${loc},"${item.Type||''}","${item.Sex||''}",${originalItemString}\n`;
+            csv += `"${item.UniqueID||''}","${item.Brand||''}","${item.Model||''}","${item.Size||''}","${item.Color||''}",${loc},"${item.Type||''}","${item.Sex||''}",${originalItemString}\r\n`;
         });
     return csv;
 }
@@ -84,17 +84,16 @@ export function generateCSV(slottedItems) {
  * @returns {Array<Array<string>>}
  */
 export function robustCSVParse(csvText) {
-    // Remove Byte Order Mark (BOM) if present
     if (csvText.charCodeAt(0) === 0xFEFF) {
         csvText = csvText.slice(1);
     }
     
-    // MODIFICATION: Normalize "smart" or "curly" quotes to standard straight quotes
     csvText = csvText.replace(/[\u201C\u201D\u201E]/g, '"');
 
-    const lines = csvText.trim().split(/\r?\n/);
+    // MODIFICATION: Normalize all line endings to \n before splitting
+    const lines = csvText.trim().replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    
     const result = [];
-    // This regex handles commas inside of double-quoted fields.
     const regex = /(?:^|,)(\"(?:[^\"]+|\"\")*\"|[^,]*)/g;
 
     for (const line of lines) {
@@ -103,7 +102,6 @@ export function robustCSVParse(csvText) {
         let match;
         while (match = regex.exec(line)) {
             let column = match[1];
-            // Remove surrounding quotes and unescape double quotes
             if (column.startsWith('"') && column.endsWith('"')) {
                 column = column.substring(1, column.length - 1).replace(/""/g, '"');
             }
