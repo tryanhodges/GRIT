@@ -322,6 +322,9 @@ function handleFileChange(event, nameElementId) {
         nameEl.textContent = file?.name || 'No file chosen...';
         if (file) {
             nameEl.innerHTML += `<span class="text-gray-400 ml-2">(${ (file.size / 1024).toFixed(2) } KB)</span>`;
+            // REC 2: Add flash effect on success
+            nameEl.classList.add('file-success-flash');
+            setTimeout(() => nameEl.classList.remove('file-success-flash'), 700);
         }
     }
     checkFiles();
@@ -337,6 +340,9 @@ function handleMultiFileChange(event, nameContainerId, clearButtonId, type) {
     if (files.length > 0) {
         fileNamesContainer.innerHTML = Array.from(files).map(f => `<div class="truncate" title="${f.name}">${f.name}</div>`).join('');
         getEl(clearButtonId).classList.remove('hidden');
+        // REC 2: Add flash effect on success
+        fileNamesContainer.classList.add('file-success-flash');
+        setTimeout(() => fileNamesContainer.classList.remove('file-success-flash'), 700);
     } else {
         fileNamesContainer.textContent = 'No files chosen...';
         getEl(clearButtonId).classList.add('hidden');
@@ -407,10 +413,8 @@ async function runSlottingProcess() {
         const result = runLocalSlottingAlgorithm({
             inventoryData,
             poData,
-            // *** FIX 1: Corrected logic for passing previous slotting data.
-            // It should only be passed if the "clear inventory" checkbox is NOT checked.
             previousSlottingData: !clearInventory ? previousSlottingData : null,
-            existingBackroom, // Pass current state if not clearing
+            existingBackroom,
             settings: {
                 rackCount: getEl('rackCount').value,
                 sectionsPerRack: getEl('sectionsPerRack').value,
@@ -763,14 +767,10 @@ async function handleApprovalAction(uid, action) {
     }
 }
 
-// *** FIX 2: Changed function from delete to disable (soft delete).
 async function deleteUser(uid, email) {
-    // Update confirmation text to reflect the "disable" action.
     showConfirmationModal(`Disable user ${email}?`, 'This will prevent the user from logging in. Their account data will be kept but their status will be set to "denied".', async () => {
         setLoading(true, `Disabling user ${email}...`);
         try {
-            // Instead of deleting the document, update its status to 'denied'.
-            // This is a "soft delete" that prevents orphaned auth accounts.
             const userRef = doc(db, 'users', uid);
             await updateDoc(userRef, { status: 'denied' });
             

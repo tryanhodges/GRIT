@@ -1,6 +1,8 @@
 body {
     font-family: 'Inter', sans-serif;
-    background-color: #f3f4f6;
+    /* REC 5: Add a subtle ambient gradient to the background */
+    background-color: #f9fafb;
+    background-image: radial-gradient(circle at top, #ffffff 0%, #f3f4f6 80%);
 }
 .rack-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 2rem; }
 .rack-container { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 8px; background-color: #ffffff; border-radius: 0.75rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1); position: relative; }
@@ -84,26 +86,31 @@ body {
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: rgba(0, 0, 0, 0.6);
+    /* REC 1: Start transparent for fade-in effect */
+    background-color: rgba(0, 0, 0, 0);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 40;
     opacity: 0;
     visibility: hidden;
-    transition: opacity 0.3s, visibility 0.3s;
+    /* REC 1: Animate background color for smooth fade */
+    transition: opacity 0.3s, visibility 0.3s, background-color 0.3s;
 }
 .modal-overlay.visible {
     opacity: 1;
     visibility: visible;
+    /* REC 1: End with semi-transparent black */
+    background-color: rgba(0, 0, 0, 0.6);
 }
 .modal-content {
     background-color: white;
     padding: 2rem;
     border-radius: 0.75rem;
-    box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+    /* REC 3: Use a softer, more diffuse shadow for better depth */
+    box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
     width: 90%;
-    max-width: 60rem; /* Increased width */
+    max-width: 60rem;
     max-height: 90vh;
     overflow-y: auto;
     transform: scale(0.95);
@@ -152,9 +159,12 @@ body {
     transform: scale(1.05);
     box-shadow: 0 5px 15px rgba(0,0,0,0.2);
 }
+/* REC 3: Enhance shadow and transform on drag */
 .detail-slot.dragging {
-    opacity: 0.5;
-    border: 2px dashed #9ca3af;
+    opacity: 0.7;
+    border: 1px dashed #9ca3af;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+    transform: scale(1.05);
 }
 .detail-slot.drag-over {
     background-color: #dbeafe !important; /* light blue */
@@ -183,3 +193,24 @@ body {
 .btn-primary:not(:disabled):hover { background-color: #4338ca; }
 .btn-secondary { background-color: white; color: #1f2937; border-color: #e5e7eb; box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05); }
 .btn-secondary:not(:disabled):hover { border-color: #d1d5db; background-color: #f9fafb; }
+
+/* REC 2: Add subtle press effect for button micro-interaction */
+.btn:not(:disabled):active {
+    transform: scale(0.97);
+    transition: transform 0.1s;
+}
+
+/* REC 2: Add animation for file upload success flash */
+.file-success-flash {
+    animation: flash-green 0.7s ease-out;
+}
+
+@keyframes flash-green {
+    0% { color: #10b981; font-weight: 600; }
+    100% { color: inherit; font-weight: normal; }
+}
+
+/* REC 3: Add a class for the enhanced header shadow */
+.control-panel-shadow {
+    box-shadow: 0 4px 12px -2px rgba(0,0,0,0.06), 0 2px 8px -3px rgba(0,0,0,0.06);
+}
