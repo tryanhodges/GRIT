@@ -32,6 +32,28 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeEventListeners();
 });
 
+/**
+ * Applies the background pattern based on opacity and density settings.
+ * @param {number|string} opacityValue - The opacity percentage (0-10).
+ * @param {number|string} densityValue - The size of the pattern tile in pixels (50-300).
+ */
+function applyBackgroundPattern(opacityValue, densityValue) {
+    const opacity = (parseInt(opacityValue, 10) || 0) / 100;
+    const density = parseInt(densityValue, 10) || 200;
+
+    if (opacity === 0) {
+        document.body.style.backgroundImage = 'none';
+        return;
+    }
+
+    const svgLogoPath = "M131.55 43.5l120.31 0c38.05,0 69.17,31.12 69.17,69.16l0 48.27 -71.58 0 0 -34.4c0,-9.14 -7.47,-16.62 -16.61,-16.62l-80.64 0c-9.14,0 -16.61,7.48 -16.61,16.62l0 191.26c0,9.14 7.47,16.61 16.61,16.61l80.64 0c9.14,0 16.61,-7.47 16.61,-16.61l0 -51.11 -66.95 0 34.12 -64.66c34.85,0 69.38,-0.27 104.41,-0.27l0 131.31c0,38.05 -31.12,69.17 -69.17,69.17l-120.31 0c-38.05,0 -69.17,-31.12 -69.17,-69.17l0 -220.4c0,-38.04 31.12,-69.16 69.17,-69.16zM733.12 44.69l137.26 0c38.04,0 69.16,31.13 69.16,69.17l0 220.4c0,38.04 -31.12,69.17 -69.16,69.17l-137.26 0c-38.04,0 -69.17,-31.13 -69.17,-69.17l0 -220.4c0,-38.04 31.13,-69.17 69.17,-69.17zm17.55 66.86l102.16 0c8.87,0 16.12,7.26 16.12,16.13l0 192.76c0,8.87 -7.25,16.13 -16.12,16.13l-102.16 0c-8.87,0 -16.13,-7.26 -16.13,-16.13l0 -192.76c0,-8.87 7.26,-16.13 16.13,-16.13zM566.17 46.6l70.58 0 0 354.03 -43.8 0c-7.27,-10.53 -16.35,-19.66 -26.78,-26.94l0 -108.13 -120.29 0 0 109.02c-9.9,7.13 -18.54,15.95 -25.52,26.05l-45.05 0 0 -135.07 -51.92 0 34.13 -64.66 17.79 0 0 -154.76 70.57 0 0 154.76 120.29 0 0 -154.3zM94.41 411.72l334.16 0c16.43,-26.24 45.26,-43.64 78.08,-43.64 32.83,0 61.66,17.4 78.09,43.64l317.99 0c18.68,0 33.96,15.28 33.96,33.96l0 37.09c0,18.67 -15.28,33.95 -33.96,33.95l-320.54 0c-16.76,24.07 -44.35,39.78 -75.54,39.78 -31.18,0 -58.77,-15.71 -75.53,-39.78l-336.71 0c-18.67,0 -33.95,-15.28 -33.95,-33.95l0 -37.09c0,-18.68 15.28,-33.96 33.95,-33.96z";
+    const svgDataUrl = `data:image/svg+xml,%3Csvg width='150' height='150' viewBox='0 0 1000 600' xmlns='http://www.w3.org/2000/svg'%3E%3Cg opacity='${opacity}'%3E%3Cpath fill='%23373435' d='${svgLogoPath}'/%3E%3C/g%3E%3C/svg%3E`;
+
+    document.body.style.backgroundImage = `url("${svgDataUrl}")`;
+    document.body.style.backgroundSize = `${density}px ${density}px`;
+}
+
+
 function initializeEventListeners() {
     // Auth
     getEl('login-btn').addEventListener('click', handleSignIn);
@@ -261,7 +283,9 @@ async function initializeFromStorage() {
             'K': { name: 'Kids', onHand: '#64d669', po: '#b1ebc4' },
             'Y': { name: 'Kids', onHand: '#64d669', po: '#b1ebc4' }
         },
-        cushionIndicatorColor: '#6b7280'
+        cushionIndicatorColor: '#6b7280',
+        bgOpacity: 5,
+        bgDensity: 200
     };
 
     const [storedSettings, slottingData, unslottedData, cushionData, poSnapshot, exclusionData] = await Promise.all([
@@ -289,6 +313,9 @@ async function initializeFromStorage() {
         if (poEl) poEl.value = finalSettings.colorMap[key].po;
     });
     getEl('colorCushion').value = finalSettings.cushionIndicatorColor;
+
+    // Apply background pattern
+    applyBackgroundPattern(finalSettings.bgOpacity, finalSettings.bgDensity);
 
     appState.userInitials = finalSettings.userInitials;
     appState.colorMap = finalSettings.colorMap;
@@ -532,13 +559,10 @@ async function saveSettings() {
     }
     setLoading(true, "Saving settings...");
     
-    // BUG FIX: Read current values from color pickers directly before saving.
-    // This ensures the app state is up-to-date with what the user sees.
     appState.colorMap['M'].onHand = getEl('colorMen').value;
     appState.colorMap['M'].po = getEl('colorMenPO').value;
     appState.colorMap['W'].onHand = getEl('colorWomen').value;
     appState.colorMap['W'].po = getEl('colorWomenPO').value;
-    // Handle 'K' and 'Y' which map to the same 'Kids' inputs
     const kidsOnHandColor = getEl('colorKids').value;
     const kidsPOColor = getEl('colorKidsPO').value;
     appState.colorMap['K'].onHand = kidsOnHandColor;
@@ -546,6 +570,9 @@ async function saveSettings() {
     appState.colorMap['Y'].onHand = kidsOnHandColor;
     appState.colorMap['Y'].po = kidsPOColor;
     appState.cushionIndicatorColor = getEl('colorCushion').value;
+    
+    const bgOpacity = getEl('bgOpacity').value;
+    const bgDensity = getEl('bgDensity').value;
     
     appState.userInitials = getEl('userInitials').value.toUpperCase();
     const settings = {
@@ -557,9 +584,14 @@ async function saveSettings() {
         includeKids: getEl('includeKids').checked,
         userInitials: appState.userInitials,
         colorMap: appState.colorMap,
-        cushionIndicatorColor: appState.cushionIndicatorColor
+        cushionIndicatorColor: appState.cushionIndicatorColor,
+        bgOpacity: bgOpacity,
+        bgDensity: bgDensity
     };
     await saveDataToFirestore(`sites/${appState.selectedSiteId}/configs/mainSettings`, settings);
+    
+    applyBackgroundPattern(bgOpacity, bgDensity);
+
     showToast('Settings saved for this site!', 'success');
     renderUI();
     renderMetricsPanel();
