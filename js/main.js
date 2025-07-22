@@ -310,6 +310,16 @@ async function initializeFromStorage() {
     renderPODetails();
     updateFilterDropdowns();
     updateUiForSiteSelection();
+
+    // BUG FIX: Re-enable view/download buttons if data exists after login/site switch.
+    // The checkFiles() function (called by updateUiForSiteSelection) disables these
+    // based on file inputs, but they should be enabled if there's stored data to view.
+    if (Object.keys(appState.finalSlottedData).length > 0) {
+        getEl('viewToggleBtn').disabled = false;
+        getEl('downloadPdfBtn').disabled = false;
+        getEl('downloadCsvBtn').disabled = false;
+    }
+
     setLoading(false);
 }
 
