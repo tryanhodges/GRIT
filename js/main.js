@@ -8,7 +8,7 @@
 // State and Firebase
 import { appState } from './state.js';
 import { db } from './firebase.js';
-import { serverTimestamp, collection, writeBatch, doc, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
+import { serverTimestamp, collection, writeBatch, doc, getDocs, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore.js";
 
 // API and Logic
 import { saveDataToFirestore, loadDataFromFirestore, deleteDocument, clearCollection, loadCollectionAsMap, batchSaveToCollection } from './api.js';
@@ -401,14 +401,15 @@ async function runSlottingProcess() {
 
         setLoading(true, 'Processing... This may take a moment.');
         
-        // MODIFICATION: Check the new checkbox
         const clearInventory = getEl('clear-inventory-checkbox').checked;
         const existingBackroom = clearInventory ? {} : { ...appState.finalSlottedData };
 
         const result = runLocalSlottingAlgorithm({
             inventoryData,
             poData,
-            previousSlottingData: clearInventory ? previousSlottingData : null, // Only use previous slotting if clearing
+            // *** FIX 1: Corrected logic for passing previous slotting data.
+            // It should only be passed if the "clear inventory" checkbox is NOT checked.
+            previousSlottingData: !clearInventory ? previousSlottingData : null,
             existingBackroom, // Pass current state if not clearing
             settings: {
                 rackCount: getEl('rackCount').value,
@@ -762,16 +763,22 @@ async function handleApprovalAction(uid, action) {
     }
 }
 
+// *** FIX 2: Changed function from delete to disable (soft delete).
 async function deleteUser(uid, email) {
-    showConfirmationModal(`Delete user ${email}?`, 'This will permanently remove the user from the system. They will need to sign up again to request access.', async () => {
-        setLoading(true, `Deleting user ${email}...`);
+    // Update confirmation text to reflect the "disable" action.
+    showConfirmationModal(`Disable user ${email}?`, 'This will prevent the user from logging in. Their account data will be kept but their status will be set to "denied".', async () => {
+        setLoading(true, `Disabling user ${email}...`);
         try {
-            await deleteDocument(`users/${uid}`);
+            // Instead of deleting the document, update its status to 'denied'.
+            // This is a "soft delete" that prevents orphaned auth accounts.
+            const userRef = doc(db, 'users', uid);
+            await updateDoc(userRef, { status: 'denied' });
+            
             renderUserManagementModal();
-            showToast(`User ${email} has been deleted.`, 'success');
+            showToast(`User ${email} has been disabled.`, 'success');
         } catch (error) {
-            console.error("Error deleting user:", error);
-            showToast("Could not delete user.", "error");
+            console.error("Error disabling user:", error);
+            showToast("Could not disable user.", "error");
         } finally {
             setLoading(false);
         }
