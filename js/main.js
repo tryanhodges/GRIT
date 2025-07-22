@@ -311,9 +311,6 @@ async function initializeFromStorage() {
     updateFilterDropdowns();
     updateUiForSiteSelection();
 
-    // BUG FIX: Re-enable view/download buttons if data exists after login/site switch.
-    // The checkFiles() function (called by updateUiForSiteSelection) disables these
-    // based on file inputs, but they should be enabled if there's stored data to view.
     if (Object.keys(appState.finalSlottedData).length > 0) {
         getEl('viewToggleBtn').disabled = false;
         getEl('downloadPdfBtn').disabled = false;
@@ -332,7 +329,6 @@ function handleFileChange(event, nameElementId) {
         nameEl.textContent = file?.name || 'No file chosen...';
         if (file) {
             nameEl.innerHTML += `<span class="text-gray-400 ml-2">(${ (file.size / 1024).toFixed(2) } KB)</span>`;
-            // REC 2: Add flash effect on success
             nameEl.classList.add('file-success-flash');
             setTimeout(() => nameEl.classList.remove('file-success-flash'), 700);
         }
@@ -350,7 +346,6 @@ function handleMultiFileChange(event, nameContainerId, clearButtonId, type) {
     if (files.length > 0) {
         fileNamesContainer.innerHTML = Array.from(files).map(f => `<div class="truncate" title="${f.name}">${f.name}</div>`).join('');
         getEl(clearButtonId).classList.remove('hidden');
-        // REC 2: Add flash effect on success
         fileNamesContainer.classList.add('file-success-flash');
         setTimeout(() => fileNamesContainer.classList.remove('file-success-flash'), 700);
     } else {
@@ -536,6 +531,21 @@ async function saveSettings() {
         return;
     }
     setLoading(true, "Saving settings...");
+    
+    // BUG FIX: Read current values from color pickers directly before saving.
+    // This ensures the app state is up-to-date with what the user sees.
+    appState.colorMap['M'].onHand = getEl('colorMen').value;
+    appState.colorMap['M'].po = getEl('colorMenPO').value;
+    appState.colorMap['W'].onHand = getEl('colorWomen').value;
+    appState.colorMap['W'].po = getEl('colorWomenPO').value;
+    // Handle 'K' and 'Y' which map to the same 'Kids' inputs
+    const kidsOnHandColor = getEl('colorKids').value;
+    const kidsPOColor = getEl('colorKidsPO').value;
+    appState.colorMap['K'].onHand = kidsOnHandColor;
+    appState.colorMap['K'].po = kidsPOColor;
+    appState.colorMap['Y'].onHand = kidsOnHandColor;
+    appState.colorMap['Y'].po = kidsPOColor;
+    appState.cushionIndicatorColor = getEl('colorCushion').value;
     
     appState.userInitials = getEl('userInitials').value.toUpperCase();
     const settings = {
