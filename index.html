@@ -333,6 +333,11 @@
                             <div>
                                 <h2 class="section-title">2. Process & Download</h2>
                                 <div class="space-y-4">
+                                    <!-- MODIFICATION: Added checkbox for clearing inventory -->
+                                    <div class="flex items-center gap-2">
+                                        <input type="checkbox" id="clear-inventory-checkbox" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" checked>
+                                        <label for="clear-inventory-checkbox" class="font-medium text-gray-700">Start with a clean slate (clears all previously slotted items)</label>
+                                    </div>
                                     <button id="slotBtn" class="action-btn bg-indigo-600 hover:bg-indigo-700" disabled>Slot Inventory</button>
                                     <div class="grid grid-cols-3 gap-2 pt-2">
                                          <button id="viewToggleBtn" class="action-btn bg-purple-600 hover:bg-purple-700 text-sm" disabled>Detail View</button>
@@ -467,11 +472,6 @@
     </div>
     <!-- END: Main App Container -->
     
-    <!-- 
-      REMOVED: Old Firebase compat scripts.
-      The main.js file is now loaded as a module and will import the necessary
-      Firebase functions directly from the CDN.
-    -->
     <script src="js/main.js" type="module"></script>
 </body>
 </html>
