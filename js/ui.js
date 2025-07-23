@@ -40,7 +40,7 @@ export function setLoading(isLoading, message = '') {
 export function showConfirmationModal(title, message, onConfirm) {
     const modal = getEl('confirmation-modal');
     getEl('confirmation-title').textContent = title;
-    getEl('confirmation-message').textContent = message;
+    getEl('confirmation-message').innerHTML = message; // Use innerHTML to allow for line breaks
     modal.classList.add('visible');
 
     const confirmBtn = getEl('confirmation-confirm-btn');
@@ -67,6 +67,23 @@ export function showConfirmationModal(title, message, onConfirm) {
 }
 
 // --- Main Rendering Functions ---
+
+function getRackDimensions(rackId) {
+    let cumulativeRacks = 0;
+    for (const layoutBlock of appState.siteRackLayout) {
+        const endRack = cumulativeRacks + layoutBlock.quantity;
+        if (rackId > cumulativeRacks && rackId <= endRack) {
+            return {
+                sectionsPerRack: layoutBlock.sectionsPerRack,
+                stacksPerSection: layoutBlock.stacksPerSection,
+                slotsPerStack: layoutBlock.slotsPerStack,
+            };
+        }
+        cumulativeRacks = endRack;
+    }
+    // Fallback to a default if not found (should not happen in normal operation)
+    return { sectionsPerRack: 8, stacksPerSection: 5, slotsPerStack: 5 };
+}
 
 export function renderUI() {
     const searchTerm = getEl('searchInput')?.value.toLowerCase().trim() || '';
@@ -110,7 +127,7 @@ export function renderUI() {
 
     const container = getEl('visualization-container');
     container.innerHTML = '';
-    const totalRacks = parseInt(getEl('rackCount')?.value) || 26;
+    const totalRacks = appState.siteRackLayout.reduce((sum, block) => sum + block.quantity, 0);
     
     const matchingSlots = new Set(Object.keys(filteredData));
     const matchingRacks = new Set(Array.from(matchingSlots).map(loc => loc.split('-')[0]));
@@ -126,10 +143,6 @@ export function renderUI() {
 }
 
 export function renderGridView(container, totalRacks, isFiltering, matchingSlots, matchingRacks) {
-    const sectionsPerRack = parseInt(getEl('sectionsPerRack').value) || 8;
-    const stacksPerSection = parseInt(getEl('stacksPerSection').value) || 5;
-    const slotsPerStack = parseInt(getEl('slotsPerStack').value) || 5;
-    const sectionOrder = Array.from({ length: sectionsPerRack }, (_, i) => i + 1);
     const excludedRacks = getEl('excludeRacks').value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
 
     let racksFound = 0;
@@ -137,6 +150,10 @@ export function renderGridView(container, totalRacks, isFiltering, matchingSlots
         if (excludedRacks.includes(rackId)) continue;
         if (isFiltering && !matchingRacks.has(rackId.toString())) continue;
         racksFound++;
+        
+        const { sectionsPerRack, stacksPerSection, slotsPerStack } = getRackDimensions(rackId);
+        const sectionOrder = Array.from({ length: sectionsPerRack }, (_, i) => i + 1);
+
         const rackEl = document.createElement('div');
         rackEl.className = 'rack-container';
         rackEl.style.gridTemplateRows = `repeat(${Math.ceil(sectionsPerRack / 2)}, auto)`;
@@ -162,7 +179,6 @@ export function renderGridView(container, totalRacks, isFiltering, matchingSlots
                         slotEl.style.backgroundColor = color;
                         slotEl.style.borderColor = colorInfo.onHand;
                     }
-                    // MODIFICATION: Only highlight if filtering
                     if (isFiltering && matchingSlots.has(locationId)) {
                         slotEl.classList.add('highlight-grid');
                     }
@@ -179,10 +195,6 @@ export function renderGridView(container, totalRacks, isFiltering, matchingSlots
 }
 
 export function renderDetailView(container, totalRacks, isFiltering, matchingSlots, matchingRacks) {
-    const sectionsPerRack = parseInt(getEl('sectionsPerRack').value) || 8;
-    const stacksPerSection = parseInt(getEl('stacksPerSection').value) || 5;
-    const slotsPerStack = parseInt(getEl('slotsPerStack').value) || 5;
-    const sectionOrder = Array.from({ length: sectionsPerRack }, (_, i) => i + 1);
     const excludedRacks = getEl('excludeRacks').value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
 
     const sidebar = document.createElement('div');
@@ -231,6 +243,8 @@ export function renderDetailView(container, totalRacks, isFiltering, matchingSlo
     }
 
     const detailRack = document.createElement('div');
+    const { sectionsPerRack, stacksPerSection, slotsPerStack } = getRackDimensions(appState.selectedRackId);
+    const sectionOrder = Array.from({ length: sectionsPerRack }, (_, i) => i + 1);
     detailRack.className = 'detail-rack-container';
     detailRack.style.gridTemplateRows = `repeat(${Math.ceil(sectionsPerRack / 2)}, auto)`;
 
@@ -268,7 +282,6 @@ export function renderDetailView(container, totalRacks, isFiltering, matchingSlo
                         slotEl.innerHTML = `<span class="text-gray-400 text-xs">${locationId}</span>`;
                     }
 
-                    // MODIFICATION: Only highlight if filtering
                     if (isFiltering && matchingSlots.has(locationId)) {
                         slotEl.classList.add('highlight-detail');
                     }
@@ -311,14 +324,20 @@ export function renderLegend() {
 }
 
 export function renderMetricsPanel(newlySlottedCount) {
-    const totalRacks = parseInt(getEl('rackCount')?.value) || 26;
+    const totalRacks = appState.siteRackLayout.reduce((sum, block) => sum + block.quantity, 0);
     const excludedRacks = getEl('excludeRacks').value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
-    const activeRacks = totalRacks - excludedRacks.length;
-
-    const sectionsPerRack = parseInt(getEl('sectionsPerRack').value) || 8;
-    const stacksPerSection = parseInt(getEl('stacksPerSection').value) || 5;
-    const slotsPerStack = parseInt(getEl('slotsPerStack').value) || 5;
-    const totalSlots = activeRacks * sectionsPerRack * stacksPerSection * slotsPerStack;
+    
+    let totalSlots = 0;
+    let cumulativeRackCount = 0;
+    for(const block of appState.siteRackLayout) {
+        for(let i = 0; i < block.quantity; i++) {
+            const currentRackId = cumulativeRackCount + i + 1;
+            if(!excludedRacks.includes(currentRackId)) {
+                totalSlots += block.sectionsPerRack * block.stacksPerSection * block.slotsPerStack;
+            }
+        }
+        cumulativeRackCount += block.quantity;
+    }
 
     const slotsUsed = Object.keys(appState.finalSlottedData).length;
     const capacity = totalSlots > 0 ? (slotsUsed / totalSlots) * 100 : 0;
@@ -741,8 +760,6 @@ export function renderPODetails() {
     }
 
     let totalItems = 0;
-    let totalValue = 0; // Assuming value could be added later
-
     allPOs.forEach(([, po]) => {
         totalItems += po.itemCount;
     });
@@ -808,4 +825,81 @@ export function toggleView() {
     appState.currentView = appState.currentView === 'grid' ? 'detail' : 'grid';
     getEl('viewToggleBtn').textContent = appState.currentView === 'grid' ? 'Detail View' : 'Grid View';
     renderUI();
+}
+
+// --- Rack Configuration UI ---
+
+export function renderRackConfigurationModal() {
+    const siteName = appState.sites.find(s => s.id === appState.selectedSiteId)?.name || '';
+    getEl('rack-config-site-name').textContent = siteName;
+    renderRackTypeLibrary();
+    renderSiteRackLayout();
+}
+
+export function renderRackTypeLibrary() {
+    const container = getEl('rack-type-library-container');
+    container.innerHTML = '';
+    if (appState.rackTypeLibrary.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 text-center py-4">No rack types created yet.</p>';
+    }
+    appState.rackTypeLibrary.forEach(type => {
+        const card = document.createElement('div');
+        card.className = 'rack-type-card';
+        card.innerHTML = `
+            <div class="flex justify-between items-center">
+                <span class="font-bold text-gray-800">${type.name}</span>
+                <div class="flex gap-2">
+                    <button data-action="add-type-to-site" data-type-name="${type.name}" class="text-indigo-600 hover:text-indigo-800" title="Add to Site Layout">
+                        <span class="material-symbols-outlined">add_circle</span>
+                    </button>
+                    <button data-action="delete-rack-type" data-type-name="${type.name}" class="text-red-500 hover:text-red-700" title="Delete Rack Type">
+                        <span class="material-symbols-outlined">delete</span>
+                    </button>
+                </div>
+            </div>
+            <p class="text-sm text-gray-600 mt-1">${type.sectionsPerRack}s, ${type.stacksPerSection}st, ${type.slotsPerStack}sl</p>
+        `;
+        container.appendChild(card);
+    });
+}
+
+export function renderSiteRackLayout() {
+    const container = getEl('site-layout-container');
+    container.innerHTML = '';
+    let totalRacks = 0;
+    let rackStartNumber = 1;
+
+    if (appState.siteRackLayout.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 text-center py-4">Add rack types from the library to build the site layout.</p>';
+    }
+
+    appState.siteRackLayout.forEach((layoutBlock, index) => {
+        const item = document.createElement('div');
+        item.className = 'site-layout-item';
+        item.setAttribute('draggable', 'true');
+        item.dataset.index = index;
+
+        const rackEndNumber = rackStartNumber + layoutBlock.quantity - 1;
+        const rackRange = layoutBlock.quantity > 0 ? `(Racks ${rackStartNumber}-${rackEndNumber})` : '';
+
+        item.innerHTML = `
+            <span class="material-symbols-outlined drag-handle">drag_indicator</span>
+            <div class="flex-grow">
+                <p class="font-bold text-gray-800">${index + 1}. ${layoutBlock.typeName}</p>
+                <div class="flex items-center gap-2 mt-1">
+                    <label class="text-sm font-medium">Qty:</label>
+                    <input type="number" value="${layoutBlock.quantity}" min="1" class="w-20 border-gray-300 rounded-md shadow-sm text-sm" data-action="update-layout-quantity" data-index="${index}">
+                    <span class="text-xs text-gray-500">${rackRange}</span>
+                </div>
+            </div>
+            <button data-action="remove-type-from-site" data-index="${index}" class="text-red-500 hover:text-red-700" title="Remove from Layout">
+                <span class="material-symbols-outlined">remove_circle</span>
+            </button>
+        `;
+        container.appendChild(item);
+        totalRacks += layoutBlock.quantity;
+        rackStartNumber = rackEndNumber + 1;
+    });
+
+    getEl('total-racks-display').textContent = totalRacks;
 }

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GRIT Multi-Site V7.2</title>
+    <title>GRIT Multi-Site V7.3</title>
     <link rel="icon" type="image/png" href="favicon.png">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
@@ -95,6 +95,46 @@
         </div>
         <!-- END: Site Management Modal -->
 
+        <!-- START: Rack Configuration Modal -->
+        <div id="rack-config-modal" class="modal-overlay">
+            <div class="modal-content max-w-4xl">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">Rack Configuration for <span id="rack-config-site-name" class="text-indigo-600"></span></h2>
+                    <button id="close-rack-config-btn" class="text-gray-500 hover:text-gray-800 text-2xl">&times;</button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <!-- Left Column: Rack Type Library -->
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <h3 class="section-title">Rack Type Library</h3>
+                        <button id="add-rack-type-btn" class="btn btn-primary w-full mb-4">Add New Rack Type</button>
+                        <div id="rack-type-library-container" class="space-y-3 max-h-96 overflow-y-auto">
+                            <!-- Rack Type Cards will be rendered here by ui.js -->
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Site Rack Layout -->
+                    <div class="bg-gray-50 p-4 rounded-lg">
+                        <h3 class="section-title">Site Layout & Priority</h3>
+                        <p class="text-sm text-gray-600 mb-2">Drag to set slotting priority.</p>
+                        <div id="site-layout-container" class="space-y-3 min-h-[200px] max-h-96 overflow-y-auto">
+                            <!-- Draggable Site Layout Items will be rendered here by ui.js -->
+                        </div>
+                        <div class="mt-4 pt-4 border-t font-semibold text-lg text-right">
+                            Total Racks: <span id="total-racks-display">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="border-t pt-4 mt-6 flex justify-end gap-4">
+                    <button id="cancel-rack-config-btn" class="btn btn-secondary">Cancel</button>
+                    <button id="save-rack-config-btn" class="btn btn-primary">Save Layout</button>
+                </div>
+            </div>
+        </div>
+        <!-- END: Rack Configuration Modal -->
+
+
         <!-- START: Settings Modal -->
         <div id="settings-modal" class="modal-overlay">
             <div class="modal-content">
@@ -105,32 +145,8 @@
                 <div class="space-y-8">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
                         <div>
-                            <h3 class="section-title">Rack Layout</h3>
-                            <div class="space-y-4 pt-2">
-                                <div>
-                                    <div class="flex items-center gap-4">
-                                        <label for="sectionsPerRack" class="font-medium text-gray-700 w-36">Sections Per Rack:</label>
-                                        <input type="number" id="sectionsPerRack" value="8" class="w-24 border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
-                                    </div>
-                                    <p id="sections-error" class="text-red-500 text-xs mt-1 hidden">Must be an even number.</p>
-                                </div>
-                                <div class="flex items-center gap-4">
-                                    <label for="stacksPerSection" class="font-medium text-gray-700 w-36">Stacks Per Section:</label>
-                                    <input type="number" id="stacksPerSection" value="5" class="w-24 border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
-                                </div>
-                                <div class="flex items-center gap-4">
-                                    <label for="slotsPerStack" class="font-medium text-gray-700 w-36">Slots Per Stack:</label>
-                                    <input type="number" id="slotsPerStack" value="5" class="w-24 border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
-                                </div>
-                            </div>
-                        </div>
-                        <div>
                             <h3 class="section-title">General</h3>
                             <div class="space-y-4 pt-2">
-                                <div class="flex items-center gap-4">
-                                    <label for="rackCount" class="font-medium text-gray-700 w-32">Total Racks:</label>
-                                    <input type="number" id="rackCount" value="26" class="w-24 border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
-                                </div>
                                 <div class="flex items-center gap-4">
                                     <label for="userInitials" class="font-medium text-gray-700 w-32">User Initials:</label>
                                     <input type="text" id="userInitials" placeholder="e.g., RH" class="w-24 border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
@@ -142,6 +158,19 @@
                                 <div>
                                     <label for="excludeRacks" class="font-medium text-gray-700">Exclude Racks (comma-separated):</label>
                                     <input type="text" id="excludeRacks" placeholder="e.g., 5, 12, 18" class="w-full mt-1 border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <h3 class="section-title">Background Pattern</h3>
+                            <div class="space-y-4 pt-2">
+                                <div>
+                                    <label for="bgOpacity" class="font-medium text-gray-700">Pattern Opacity</label>
+                                    <input type="range" id="bgOpacity" min="0" max="10" value="5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                                </div>
+                                <div>
+                                    <label for="bgDensity" class="font-medium text-gray-700">Pattern Density</label>
+                                    <input type="range" id="bgDensity" min="50" max="300" value="200" step="10" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
                                 </div>
                             </div>
                         </div>
@@ -174,22 +203,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div>
-                            <h3 class="section-title">Background Pattern</h3>
-                            <div class="space-y-4 pt-2">
-                                <div>
-                                    <label for="bgOpacity" class="font-medium text-gray-700">Pattern Opacity</label>
-                                    <input type="range" id="bgOpacity" min="0" max="10" value="5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
-                                </div>
-                                <div>
-                                    <label for="bgDensity" class="font-medium text-gray-700">Pattern Density</label>
-                                    <input type="range" id="bgDensity" min="50" max="300" value="200" step="10" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 manager-only">
-                        <div>
+                        <div class="manager-only">
                             <h3 class="section-title">Data Management</h3>
                             <div class="space-y-4 pt-2">
                                 <button id="clear-cushion-data-btn" class="btn btn-secondary bg-red-100 text-red-700 hover:bg-red-200 w-full">Clear All Cushion Data</button>
@@ -287,6 +301,9 @@
                             </div>
                              <button id="open-site-management-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600 manager-only hidden" title="Manage Sites">
                                 <span class="material-symbols-outlined">store</span>
+                            </button>
+                             <button id="open-rack-config-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600 manager-only hidden" title="Rack Configuration">
+                                <span class="material-symbols-outlined">grid_view</span>
                             </button>
                              <button id="open-user-management-btn" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 flex items-center justify-center text-gray-600 manager-only hidden" title="Manage Users">
                                 <span class="material-symbols-outlined">manage_accounts</span>

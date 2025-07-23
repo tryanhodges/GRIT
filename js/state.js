@@ -31,6 +31,8 @@ export const appState = {
     cushionLevels: [],
     modelCushionAssignments: {},
     allKnownModels: [], // To store all unique models for cushioning
+    rackTypeLibrary: [], // NEW: Global library of rack type templates
+    siteRackLayout: [], // NEW: The specific layout for the selected site
     
     // UI State
     currentView: 'grid',

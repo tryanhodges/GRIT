@@ -22,7 +22,7 @@ import {
     renderUI, renderPODetails, renderUnslottedReport, renderExclusionList, renderCushionUI,
     renderSiteManagementModal, renderUserManagementModal, renderMetricsPanel, updateModelAssignmentList,
     adjustUiForRole, updateUiForSiteSelection, renderSiteSelector, updateFilterDropdowns, checkFiles,
-    toggleView
+    toggleView, renderRackConfigurationModal, renderRackTypeLibrary, renderSiteRackLayout
 } from './ui.js';
 
 // --- Initialization ---
@@ -32,11 +32,6 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeEventListeners();
 });
 
-/**
- * Applies the background pattern based on opacity and density settings.
- * @param {number|string} opacityValue - The opacity percentage (0-10).
- * @param {number|string} densityValue - The size of the pattern tile in pixels (50-300).
- */
 function applyBackgroundPattern(opacityValue, densityValue) {
     const opacity = (parseInt(opacityValue, 10) || 0) / 100;
     const density = parseInt(densityValue, 10) || 200;
@@ -52,7 +47,6 @@ function applyBackgroundPattern(opacityValue, densityValue) {
     document.body.style.backgroundImage = `url("${svgDataUrl}")`;
     document.body.style.backgroundSize = `${density}px ${density}px`;
 }
-
 
 function initializeEventListeners() {
     // Auth
@@ -100,9 +94,11 @@ function initializeEventListeners() {
     getEl('invTemplateBtn').addEventListener('click', (e) => { e.preventDefault(); downloadFile(`"System ID","UPC","EAN","Custom SKU","Manufact. SKU","Item","Remaining","total cost","avg. cost","sale price","margin"\n"ignore","ignore","ignore","ignore","ignore","Cloudsurfer | Undyed/White 11.5","2","ignore","ignore","ignore","ignore"`, 'inventory_template.csv'); });
     getEl('poTemplateBtn').addEventListener('click', (e) => { e.preventDefault(); downloadFile(`"PO Number","Item","Quantity","Checked In"\n"12345","Cloud 5 | Black/White 10.5","5","0"`, 'po_template.csv'); });
 
+    // Modals
     initializeModal('settings-modal', 'open-settings-btn', 'close-settings-btn');
     initializeModal('user-management-modal', 'open-user-management-btn', 'close-user-management-btn', renderUserManagementModal);
     initializeModal('site-management-modal', 'open-site-management-btn', 'close-site-management-btn', renderSiteManagementModal);
+    initializeModal('rack-config-modal', 'open-rack-config-btn', 'close-rack-config-btn', renderRackConfigurationModal);
     
     getEl('save-settings-btn').addEventListener('click', () => {
         saveSettings();
@@ -117,6 +113,12 @@ function initializeEventListeners() {
         appState.selectedSiteId = e.target.value;
         initializeFromStorage();
     });
+    
+    // Rack Config Modal Listeners
+    getEl('add-rack-type-btn').addEventListener('click', handleAddOrEditRackType);
+    getEl('save-rack-config-btn').addEventListener('click', saveRackConfiguration);
+    getEl('cancel-rack-config-btn').addEventListener('click', () => getEl('rack-config-modal').classList.remove('visible'));
+
 
     const helpBtn = getEl('help-btn');
     const helpDropdown = getEl('help-dropdown');
@@ -148,62 +150,45 @@ function initializeEventListeners() {
 
     document.body.addEventListener('click', (e) => {
         const target = e.target;
-        const action = target.dataset.action || target.closest('[data-action]')?.dataset.action;
+        const actionTarget = target.closest('[data-action]');
+        if (!actionTarget) return;
+        
+        const action = actionTarget.dataset.action;
+        const { siteId, siteName, poKey, keyword, rackId, uid, email, level, typeName, index } = actionTarget.dataset;
 
         switch(action) {
-            case 'delete-site':
-                deleteSite(target.dataset.siteId, target.dataset.siteName);
-                break;
-            case 'receive-po':
-                if (appState.currentUser.role === 'manager') {
-                    markPOAsReceived(target.dataset.poKey);
-                } else {
-                    showToast("You do not have permission to receive POs.", "error");
-                }
-                break;
-            case 'remove-exclusion':
-                removeExclusionKeyword(target.dataset.keyword);
-                break;
-            case 'select-rack-title':
-                appState.selectedRackId = parseInt(target.dataset.rackId);
-                toggleView();
-                break;
-            case 'select-rack':
-                appState.selectedRackId = parseInt(target.closest('[data-action="select-rack"]').dataset.rackId);
-                renderUI();
-                break;
-            case 'approve-user':
-                handleApprovalAction(target.dataset.uid, 'approved');
-                break;
-            case 'deny-user':
-                handleApprovalAction(target.dataset.uid, 'denied');
-                break;
-            case 'delete-user':
-                deleteUser(target.dataset.uid, target.dataset.email);
-                break;
-            case 'remove-cushion-level':
-                removeCushionLevel(target.dataset.level);
-                break;
+            case 'delete-site': deleteSite(siteId, siteName); break;
+            case 'receive-po': markPOAsReceived(poKey); break;
+            case 'remove-exclusion': removeExclusionKeyword(keyword); break;
+            case 'select-rack-title': appState.selectedRackId = parseInt(rackId); toggleView(); break;
+            case 'select-rack': appState.selectedRackId = parseInt(rackId); renderUI(); break;
+            case 'approve-user': handleApprovalAction(uid, 'approved'); break;
+            case 'deny-user': handleApprovalAction(uid, 'denied'); break;
+            case 'delete-user': deleteUser(uid, email); break;
+            case 'remove-cushion-level': removeCushionLevel(level); break;
+            case 'delete-rack-type': deleteRackType(typeName); break;
+            case 'add-type-to-site': addRackTypeToSite(typeName); break;
+            case 'remove-type-from-site': removeRackTypeFromSite(parseInt(index)); break;
         }
     });
     
     document.body.addEventListener('change', (e) => {
         const target = e.target;
         const action = target.dataset.action;
+        if (!action) return;
+
+        const { uid, model, index } = target.dataset;
 
         switch(action) {
-            case 'update-role':
-                updateUserRole(target.dataset.uid, target.value);
-                break;
+            case 'update-role': updateUserRole(uid, target.value); break;
             case 'assign-cushion':
-                const model = target.dataset.model;
                 const selectedLevel = target.value;
-                if (selectedLevel) {
-                    appState.modelCushionAssignments[model] = selectedLevel;
-                } else {
-                    delete appState.modelCushionAssignments[model];
-                }
+                if (selectedLevel) appState.modelCushionAssignments[model] = selectedLevel;
+                else delete appState.modelCushionAssignments[model];
                 saveCushionData();
+                break;
+            case 'update-layout-quantity':
+                updateLayoutQuantity(parseInt(index), parseInt(target.value));
                 break;
         }
     });
@@ -275,8 +260,7 @@ async function initializeFromStorage() {
     appState.exclusionKeywords = [];
     
     const defaultSettings = {
-        rackCount: 26, sectionsPerRack: 8, stacksPerSection: 5, slotsPerStack: 5,
-        excludeRacks: '', includeKids: false, userInitials: '',
+        userInitials: '', includeKids: false, excludeRacks: '',
         colorMap: {
             'M': { name: 'Men', onHand: '#5468C1', po: '#a9b3e0' },
             'W': { name: 'Women', onHand: '#f846f0', po: '#fbc2f8' },
@@ -284,12 +268,16 @@ async function initializeFromStorage() {
             'Y': { name: 'Kids', onHand: '#64d669', po: '#b1ebc4' }
         },
         cushionIndicatorColor: '#6b7280',
-        bgOpacity: 5,
-        bgDensity: 200
+        bgOpacity: 5, bgDensity: 200
     };
 
-    const [storedSettings, slottingData, unslottedData, cushionData, poSnapshot, exclusionData] = await Promise.all([
+    const [
+        storedSettings, rackConfig, rackLibrary, slottingData, 
+        unslottedData, cushionData, poSnapshot, exclusionData
+    ] = await Promise.all([
         loadDataFromFirestore(`sites/${appState.selectedSiteId}/configs/mainSettings`),
+        loadDataFromFirestore(`sites/${appState.selectedSiteId}/configs/rackConfiguration`),
+        loadDataFromFirestore('configs/rackTypeLibrary'),
         loadCollectionAsMap(`sites/${appState.selectedSiteId}/slotting`),
         loadDataFromFirestore(`sites/${appState.selectedSiteId}/reports/unslotted`),
         loadDataFromFirestore('configs/cushionData'),
@@ -314,12 +302,13 @@ async function initializeFromStorage() {
     });
     getEl('colorCushion').value = finalSettings.cushionIndicatorColor;
 
-    // Apply background pattern
     applyBackgroundPattern(finalSettings.bgOpacity, finalSettings.bgDensity);
 
     appState.userInitials = finalSettings.userInitials;
     appState.colorMap = finalSettings.colorMap;
     appState.cushionIndicatorColor = finalSettings.cushionIndicatorColor;
+    appState.siteRackLayout = rackConfig?.layout || [];
+    appState.rackTypeLibrary = rackLibrary?.types || [];
     appState.finalSlottedData = slottingData || {};
     appState.unslottedItems = unslottedData?.items || [];
     appState.cushionLevels = cushionData?.levels || [];
@@ -448,10 +437,7 @@ async function runSlottingProcess() {
             previousSlottingData: !clearInventory ? previousSlottingData : null,
             existingBackroom,
             settings: {
-                rackCount: getEl('rackCount').value,
-                sectionsPerRack: getEl('sectionsPerRack').value,
-                stacksPerSection: getEl('stacksPerSection').value,
-                slotsPerStack: getEl('slotsPerStack').value,
+                siteRackLayout: appState.siteRackLayout,
                 excludeRacks: getEl('excludeRacks').value,
                 includeKids: getEl('includeKids').checked,
             },
@@ -576,10 +562,6 @@ async function saveSettings() {
     
     appState.userInitials = getEl('userInitials').value.toUpperCase();
     const settings = {
-        rackCount: getEl('rackCount').value,
-        sectionsPerRack: getEl('sectionsPerRack').value,
-        stacksPerSection: getEl('stacksPerSection').value,
-        slotsPerStack: getEl('slotsPerStack').value,
         excludeRacks: getEl('excludeRacks').value,
         includeKids: getEl('includeKids').checked,
         userInitials: appState.userInitials,
@@ -759,6 +741,7 @@ async function deleteSite(siteId, siteName) {
             await clearCollection(`sites/${siteId}/slotting`);
             await clearCollection(`sites/${siteId}/purchaseOrders`);
             await deleteDocument(`sites/${siteId}/configs/mainSettings`);
+            await deleteDocument(`sites/${siteId}/configs/rackConfiguration`);
             await deleteDocument(`sites/${siteId}/configs/exclusionKeywords`);
             await deleteDocument(`sites/${siteId}/reports/unslotted`);
             await deleteDocument(`sites/${siteId}`);
@@ -876,53 +859,215 @@ async function saveCushionData() {
     });
 }
 
-function handleDragStart(e) {
-    if (e.target.classList.contains('detail-slot') && e.target.draggable) {
-        e.dataTransfer.setData('text/plain', e.target.dataset.locationId);
-        e.target.classList.add('dragging');
+// --- Rack Configuration Logic ---
+
+function handleAddOrEditRackType() {
+    showConfirmationModal(
+        'Add New Rack Type',
+        `<div class="space-y-4 text-left">
+            <div>
+                <label for="rackTypeName" class="block text-sm font-medium text-gray-700">Rack Type Name</label>
+                <input type="text" id="rackTypeName" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" placeholder="e.g., Standard Shoe Wall">
+            </div>
+            <div class="grid grid-cols-3 gap-4">
+                <div>
+                    <label for="rackTypeSections" class="block text-sm font-medium text-gray-700">Sections</label>
+                    <input type="number" id="rackTypeSections" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" value="8">
+                </div>
+                <div>
+                    <label for="rackTypeStacks" class="block text-sm font-medium text-gray-700">Stacks</label>
+                    <input type="number" id="rackTypeStacks" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" value="5">
+                </div>
+                <div>
+                    <label for="rackTypeSlots" class="block text-sm font-medium text-gray-700">Slots</label>
+                    <input type="number" id="rackTypeSlots" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" value="5">
+                </div>
+            </div>
+        </div>`,
+        async () => {
+            const name = getEl('rackTypeName').value.trim();
+            const sections = parseInt(getEl('rackTypeSections').value);
+            const stacks = parseInt(getEl('rackTypeStacks').value);
+            const slots = parseInt(getEl('rackTypeSlots').value);
+
+            if (!name || isNaN(sections) || isNaN(stacks) || isNaN(slots)) {
+                showToast("Please fill out all fields for the rack type.", "error");
+                return;
+            }
+            if (appState.rackTypeLibrary.some(t => t.name === name)) {
+                showToast("A rack type with this name already exists.", "error");
+                return;
+            }
+
+            appState.rackTypeLibrary.push({ name, sectionsPerRack: sections, stacksPerSection: stacks, slotsPerStack: slots });
+            await saveDataToFirestore('configs/rackTypeLibrary', { types: appState.rackTypeLibrary });
+            renderRackTypeLibrary();
+            showToast(`Rack type "${name}" created.`, "success");
+        }
+    );
+}
+
+async function deleteRackType(typeName) {
+    if (appState.siteRackLayout.some(block => block.typeName === typeName)) {
+        showToast(`Cannot delete "${typeName}" as it is currently in use by this site's layout.`, "error");
+        return;
     }
-    if (e.target.classList.contains('cushion-level-item')) {
-        e.dataTransfer.setData('text/level', e.target.dataset.level);
-        e.target.classList.add('dragging');
+    showConfirmationModal(`Delete Rack Type "${typeName}"?`, 'This will permanently remove this template from the library.', async () => {
+        appState.rackTypeLibrary = appState.rackTypeLibrary.filter(t => t.name !== typeName);
+        await saveDataToFirestore('configs/rackTypeLibrary', { types: appState.rackTypeLibrary });
+        renderRackTypeLibrary();
+        showToast(`Rack type "${typeName}" deleted.`, "success");
+    });
+}
+
+function addRackTypeToSite(typeName) {
+    const type = appState.rackTypeLibrary.find(t => t.name === typeName);
+    if (type) {
+        appState.siteRackLayout.push({
+            typeName: type.name,
+            quantity: 1,
+            sectionsPerRack: type.sectionsPerRack,
+            stacksPerSection: type.stacksPerSection,
+            slotsPerStack: type.slotsPerStack
+        });
+        renderSiteRackLayout();
+    }
+}
+
+function removeRackTypeFromSite(index) {
+    appState.siteRackLayout.splice(index, 1);
+    renderSiteRackLayout();
+}
+
+function updateLayoutQuantity(index, quantity) {
+    if (appState.siteRackLayout[index]) {
+        appState.siteRackLayout[index].quantity = Math.max(0, quantity); // Ensure quantity isn't negative
+        renderSiteRackLayout();
+    }
+}
+
+async function saveRackConfiguration() {
+    const oldTotalRacks = appState.siteRackLayout.reduce((sum, block) => sum + block.quantity, 0);
+    const newLayout = [];
+    const layoutContainer = getEl('site-layout-container');
+    const items = layoutContainer.querySelectorAll('.site-layout-item');
+    items.forEach(item => {
+        const index = parseInt(item.dataset.index);
+        const originalBlock = appState.siteRackLayout[index];
+        const quantity = parseInt(item.querySelector('input[type="number"]').value);
+        newLayout.push({ ...originalBlock, quantity });
+    });
+    
+    const newTotalRacks = newLayout.reduce((sum, block) => sum + block.quantity, 0);
+
+    const confirmAndSave = async () => {
+        setLoading(true, "Saving new rack layout...");
+        appState.siteRackLayout = newLayout;
+        await saveDataToFirestore(`sites/${appState.selectedSiteId}/configs/rackConfiguration`, { layout: appState.siteRackLayout });
+
+        // If racks were removed, find and unslot items from the removed racks
+        if (newTotalRacks < oldTotalRacks) {
+            const itemsToUnslot = {};
+            const batch = writeBatch(db);
+            Object.entries(appState.finalSlottedData).forEach(([loc, item]) => {
+                const rackNum = parseInt(loc.split('-')[0]);
+                if (rackNum > newTotalRacks) {
+                    itemsToUnslot[loc] = item;
+                    batch.delete(doc(db, `sites/${appState.selectedSiteId}/slotting/${loc}`));
+                }
+            });
+            
+            Object.keys(itemsToUnslot).forEach(loc => delete appState.finalSlottedData[loc]);
+            const unslottedItems = Object.values(itemsToUnslot);
+            appState.unslottedItems.push(...unslottedItems);
+
+            await batch.commit();
+            await saveDataToFirestore(`sites/${appState.selectedSiteId}/reports/unslotted`, { items: appState.unslottedItems }, false);
+        }
+        
+        setLoading(false);
+        getEl('rack-config-modal').classList.remove('visible');
+        showToast("Rack layout saved successfully!", "success");
+        renderUI();
+        renderMetricsPanel();
+    };
+
+    if (newTotalRacks < oldTotalRacks) {
+        showConfirmationModal(
+            'Confirm Rack Reduction',
+            `You are reducing the total number of racks from ${oldTotalRacks} to ${newTotalRacks}.<br><br>All items currently in racks ${newTotalRacks + 1} to ${oldTotalRacks} will be unslotted.`,
+            confirmAndSave
+        );
+    } else {
+        appState.siteRackLayout = newLayout; // Update state immediately for reordering
+        await confirmAndSave();
+    }
+}
+
+
+// --- Drag and Drop ---
+
+function handleDragStart(e) {
+    const dragTarget = e.target.closest('[draggable="true"]');
+    if (!dragTarget) return;
+
+    if (dragTarget.classList.contains('detail-slot')) {
+        e.dataTransfer.setData('text/plain', dragTarget.dataset.locationId);
+        dragTarget.classList.add('dragging');
+    }
+    if (dragTarget.classList.contains('cushion-level-item')) {
+        e.dataTransfer.setData('text/level', dragTarget.dataset.level);
+        dragTarget.classList.add('dragging');
+    }
+    if (dragTarget.classList.contains('site-layout-item')) {
+        e.dataTransfer.setData('text/layout-index', dragTarget.dataset.index);
+        dragTarget.classList.add('dragging');
     }
 }
 
 function handleDragEnd(e) {
-    if (e.target.classList.contains('detail-slot')) {
-        e.target.classList.remove('dragging');
-    }
-    if (e.target.classList.contains('cushion-level-item')) {
-        e.target.classList.remove('dragging');
+    const dragTarget = e.target.closest('[draggable="true"]');
+    if (dragTarget) {
+       dragTarget.classList.remove('dragging');
     }
 }
 
 function handleDragOver(e) {
     e.preventDefault();
-    const targetSlot = e.target.closest('.detail-slot');
-    if (targetSlot) {
-        targetSlot.classList.add('drag-over');
+    const dropTarget = e.target.closest('.detail-slot, .site-layout-item');
+    if (dropTarget) {
+        dropTarget.classList.add('drag-over');
     }
 }
 
 function handleDragLeave(e) {
-    const targetSlot = e.target.closest('.detail-slot');
-    if (targetSlot) {
-        targetSlot.classList.remove('drag-over');
+    const dropTarget = e.target.closest('.detail-slot, .site-layout-item');
+    if (dropTarget) {
+        dropTarget.classList.remove('drag-over');
     }
 }
 
 async function handleDrop(e) {
     e.preventDefault();
     const draggedLevel = e.dataTransfer.getData('text/level');
-    if (draggedLevel) {
-        handleCushionLevelDrop(e, draggedLevel);
-        return;
-    }
-    
     const draggedLocationId = e.dataTransfer.getData('text/plain');
+    const draggedLayoutIndex = e.dataTransfer.getData('text/layout-index');
+    
+    const dropTarget = e.target.closest('.detail-slot, .cushion-level-item, .site-layout-item');
+    if(dropTarget) dropTarget.classList.remove('drag-over');
+
+    if (draggedLevel && dropTarget?.classList.contains('cushion-level-item')) {
+        handleCushionLevelDrop(e, draggedLevel);
+    } else if (draggedLocationId && dropTarget?.classList.contains('detail-slot')) {
+        handleSlotDrop(e, draggedLocationId);
+    } else if (draggedLayoutIndex && dropTarget?.classList.contains('site-layout-item')) {
+        handleLayoutDrop(e, draggedLayoutIndex);
+    }
+}
+
+async function handleSlotDrop(e, draggedLocationId) {
     const targetSlot = e.target.closest('.detail-slot');
     if (targetSlot) {
-        targetSlot.classList.remove('drag-over');
         const targetLocationId = targetSlot.dataset.locationId;
         if (draggedLocationId && targetLocationId && draggedLocationId !== targetLocationId) {
             const item1 = appState.finalSlottedData[draggedLocationId];
@@ -962,6 +1107,19 @@ async function handleCushionLevelDrop(e, draggedLevel) {
             
             renderCushionUI();
             await saveCushionData();
+        }
+    }
+}
+
+function handleLayoutDrop(e, draggedIndexStr) {
+    const targetItem = e.target.closest('.site-layout-item');
+    if (targetItem) {
+        const draggedIndex = parseInt(draggedIndexStr);
+        const targetIndex = parseInt(targetItem.dataset.index);
+        if (!isNaN(draggedIndex) && !isNaN(targetIndex) && draggedIndex !== targetIndex) {
+            const [removed] = appState.siteRackLayout.splice(draggedIndex, 1);
+            appState.siteRackLayout.splice(targetIndex, 0, removed);
+            renderSiteRackLayout();
         }
     }
 }

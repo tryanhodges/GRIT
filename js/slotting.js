@@ -140,14 +140,12 @@ export function runLocalSlottingAlgorithm(data) {
         inventoryData = [],
         poData = [],
         previousSlottingData = null,
-        existingBackroom = {}, // MODIFICATION: Accept existing backroom data
+        existingBackroom = {},
         settings = {},
         cushionData = { levels: [], assignments: {} },
         exclusionKeywords = []
     } = data;
 
-    // MODIFICATION: If not starting clean, use the provided existingBackroom data.
-    // Otherwise, parse the previousSlottingFile if it exists.
     let backroom = { ...existingBackroom };
     if (Object.keys(existingBackroom).length === 0 && previousSlottingData) {
         const lines = robustCSVParse(previousSlottingData);
@@ -246,12 +244,11 @@ export function runLocalSlottingAlgorithm(data) {
     const alreadyPlacedUniqueIDs = new Set(Object.values(backroom).map(item => item.UniqueID));
     const currentInventoryMap = new Map(allInventoryItems.map(item => [item.UniqueID, item]));
 
-    // If we are in additive mode, we need to reconcile the existing data with the new inventory files
     if (Object.keys(existingBackroom).length > 0) {
         Object.keys(backroom).forEach(locationId => {
             const item = backroom[locationId];
             if (item.Type === 'Inventory' && !currentInventoryMap.has(item.UniqueID)) {
-                delete backroom[locationId]; // Remove item if it's no longer in the inventory files
+                delete backroom[locationId];
             }
         });
     }
@@ -285,7 +282,7 @@ export function runLocalSlottingAlgorithm(data) {
         return a.Size.localeCompare(b.Size);
     });
 
-    const { rackCount, sectionsPerRack, stacksPerSection, slotsPerStack, excludeRacks } = settings;
+    const { siteRackLayout, excludeRacks } = settings;
     const excludedRacksArr = excludeRacks.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
     const rackAssignments = {};
     Object.entries(backroom).forEach(([locationId, item]) => {
@@ -306,63 +303,70 @@ export function runLocalSlottingAlgorithm(data) {
         { mixColors: false, mixBrands: true }, { mixColors: true, mixBrands: true }
     ];
 
+    let rackIdCounter = 1;
     for (const passConfig of slottingPasses) {
         const remainingGroups = [];
         for (const group of unslottedGroups) {
             const { item, originalItems } = group;
             let slotted = false;
             groupSearch:
-            for (let rackId = 1; rackId <= rackCount; rackId++) {
-                if (excludedRacksArr.includes(rackId)) continue;
-                const rackInfo = rackAssignments[rackId];
-                if (rackInfo && rackInfo.sex !== item.Sex) continue;
-                if (rackInfo && !passConfig.mixBrands && rackInfo.brand !== item.Brand) continue;
+            for (const layoutBlock of siteRackLayout) {
+                const { quantity, sectionsPerRack, stacksPerSection, slotsPerStack } = layoutBlock;
+                for (let i = 0; i < quantity; i++) {
+                    const rackId = rackIdCounter + i;
+                    if (excludedRacksArr.includes(rackId)) continue;
+                    
+                    const rackInfo = rackAssignments[rackId];
+                    if (rackInfo && rackInfo.sex !== item.Sex) continue;
+                    if (rackInfo && !passConfig.mixBrands && rackInfo.brand !== item.Brand) continue;
 
-                for (let sectionId = 1; sectionId <= sectionsPerRack; sectionId++) {
-                    let slotsInStack = {};
-                    let emptySlotsInSection = 0;
-                    for (let sId = 1; sId <= stacksPerSection; sId++) {
-                        slotsInStack[sId] = { model: null, color: null, emptySlots: 0 };
-                        for (let slId = 1; slId <= slotsPerStack; slId++) {
-                            const loc = `${rackId}-${sectionId}-${sId}-${slId}`;
-                            if (backroom[loc]) {
-                                if (!slotsInStack[sId].model) {
-                                    slotsInStack[sId].model = backroom[loc].Model;
-                                    slotsInStack[sId].color = backroom[loc].Color;
+                    for (let sectionId = 1; sectionId <= sectionsPerRack; sectionId++) {
+                        let slotsInStack = {};
+                        let emptySlotsInSection = 0;
+                        for (let sId = 1; sId <= stacksPerSection; sId++) {
+                            slotsInStack[sId] = { model: null, color: null, emptySlots: 0 };
+                            for (let slId = 1; slId <= slotsPerStack; slId++) {
+                                const loc = `${rackId}-${sectionId}-${sId}-${slId}`;
+                                if (backroom[loc]) {
+                                    if (!slotsInStack[sId].model) {
+                                        slotsInStack[sId].model = backroom[loc].Model;
+                                        slotsInStack[sId].color = backroom[loc].Color;
+                                    }
+                                } else {
+                                    slotsInStack[sId].emptySlots++;
+                                    emptySlotsInSection++;
                                 }
-                            } else {
-                                slotsInStack[sId].emptySlots++;
-                                emptySlotsInSection++;
                             }
                         }
-                    }
-                    if (emptySlotsInSection < originalItems.length) continue;
-                    let availableStacks = [];
-                    for (let sId = 1; sId <= stacksPerSection; sId++) {
-                        const stack = slotsInStack[sId];
-                        const canUseStack = stack.emptySlots > 0 && (!stack.model || (stack.model === item.Model && stack.color === item.Color) || (passConfig.mixColors && stack.model === item.Model));
-                        if (canUseStack) availableStacks.push({ stackId: sId, emptySlots: stack.emptySlots });
-                    }
-                    if (availableStacks.reduce((sum, s) => sum + s.emptySlots, 0) >= originalItems.length) {
-                        let placedCount = 0;
-                        for (const stack of availableStacks.sort((a,b) => b.stackId - a.stackId)) {
-                            for (let slotId = 1; slotId <= slotsPerStack; slotId++) {
+                        if (emptySlotsInSection < originalItems.length) continue;
+                        let availableStacks = [];
+                        for (let sId = 1; sId <= stacksPerSection; sId++) {
+                            const stack = slotsInStack[sId];
+                            const canUseStack = stack.emptySlots > 0 && (!stack.model || (stack.model === item.Model && stack.color === item.Color) || (passConfig.mixColors && stack.model === item.Model));
+                            if (canUseStack) availableStacks.push({ stackId: sId, emptySlots: stack.emptySlots });
+                        }
+                        if (availableStacks.reduce((sum, s) => sum + s.emptySlots, 0) >= originalItems.length) {
+                            let placedCount = 0;
+                            for (const stack of availableStacks.sort((a,b) => b.stackId - a.stackId)) {
+                                for (let slotId = 1; slotId <= slotsPerStack; slotId++) {
+                                    if (placedCount >= originalItems.length) break;
+                                    const locId = `${rackId}-${sectionId}-${stack.stackId}-${slotId}`;
+                                    if (!backroom[locId]) {
+                                        const currentItem = originalItems[placedCount];
+                                        backroom[locId] = currentItem;
+                                        currentItem.LocationID = locId;
+                                        if (!rackAssignments[rackId]) rackAssignments[rackId] = { sex: item.Sex, brand: item.Brand };
+                                        placedCount++;
+                                    }
+                                }
                                 if (placedCount >= originalItems.length) break;
-                                const locId = `${rackId}-${sectionId}-${stack.stackId}-${slotId}`;
-                                if (!backroom[locId]) {
-                                    const currentItem = originalItems[placedCount];
-                                    backroom[locId] = currentItem;
-                                    currentItem.LocationID = locId;
-                                    if (!rackAssignments[rackId]) rackAssignments[rackId] = { sex: item.Sex, brand: item.Brand };
-                                    placedCount++;
-                                }
                             }
-                            if (placedCount >= originalItems.length) break;
+                            slotted = true;
+                            break groupSearch;
                         }
-                        slotted = true;
-                        break groupSearch;
                     }
                 }
+                rackIdCounter += quantity;
             }
             if (!slotted) remainingGroups.push(group);
         }
