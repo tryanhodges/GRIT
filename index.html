@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GRIT Multi-Site V7.3</title>
+    <title>GRIT Multi-Site V7.4</title>
     <link rel="icon" type="image/png" href="favicon.png">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
@@ -33,6 +33,31 @@
         </div>
     </div>
     <!-- END: Confirmation Modal -->
+
+    <!-- START: Brand Assignment Sub-Modal -->
+    <div id="brand-assignment-modal" class="modal-overlay" style="z-index: 45;">
+        <div class="modal-content max-w-2xl">
+            <h2 id="brand-assignment-title" class="text-xl font-bold text-gray-800 mb-4">Brand Assignments</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <h3 class="font-semibold text-gray-700 mb-2">Available Brands</h3>
+                    <div id="available-brands-list" class="border rounded-md p-2 h-64 overflow-y-auto bg-gray-50 space-y-1">
+                        <!-- Available brands will be rendered here -->
+                    </div>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-gray-700 mb-2">Assigned Brands</h3>
+                    <div id="assigned-brands-list" class="border rounded-md p-2 h-64 overflow-y-auto bg-white space-y-1">
+                        <!-- Assigned brands will be rendered here -->
+                    </div>
+                </div>
+            </div>
+            <div class="flex justify-end mt-6">
+                <button id="brand-assignment-done-btn" class="btn btn-primary">Done</button>
+            </div>
+        </div>
+    </div>
+    <!-- END: Brand Assignment Sub-Modal -->
 
     <!-- START: Auth Container -->
     <div id="auth-container" class="max-w-md mx-auto mt-10">

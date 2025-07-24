@@ -234,3 +234,23 @@ body {
     opacity: 0.5;
     background-color: #eef2ff;
 }
+
+.site-layout-item.drag-over {
+    outline: 2px dashed #4f46e5;
+}
+
+.brand-tag-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.5rem;
+}
+
+.brand-tag {
+    background-color: #e0e7ff;
+    color: #3730a3;
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 0.125rem 0.5rem;
+    border-radius: 9999px;
+}

@@ -22,7 +22,7 @@ import {
     renderUI, renderPODetails, renderUnslottedReport, renderExclusionList, renderCushionUI,
     renderSiteManagementModal, renderUserManagementModal, renderMetricsPanel, updateModelAssignmentList,
     adjustUiForRole, updateUiForSiteSelection, renderSiteSelector, updateFilterDropdowns, checkFiles,
-    toggleView, renderRackConfigurationModal, renderRackTypeLibrary, renderSiteRackLayout
+    toggleView, renderRackConfigurationModal, renderRackTypeLibrary, renderSiteRackLayout, renderBrandAssignmentModal
 } from './ui.js';
 
 // --- Initialization ---
@@ -118,6 +118,7 @@ function initializeEventListeners() {
     getEl('add-rack-type-btn').addEventListener('click', handleAddOrEditRackType);
     getEl('save-rack-config-btn').addEventListener('click', saveRackConfiguration);
     getEl('cancel-rack-config-btn').addEventListener('click', () => getEl('rack-config-modal').classList.remove('visible'));
+    getEl('brand-assignment-done-btn').addEventListener('click', () => getEl('brand-assignment-modal').classList.remove('visible'));
 
 
     const helpBtn = getEl('help-btn');
@@ -154,7 +155,7 @@ function initializeEventListeners() {
         if (!actionTarget) return;
         
         const action = actionTarget.dataset.action;
-        const { siteId, siteName, poKey, keyword, rackId, uid, email, level, typeName, index } = actionTarget.dataset;
+        const { siteId, siteName, poKey, keyword, rackId, uid, email, level, typeName, index, brand } = actionTarget.dataset;
 
         switch(action) {
             case 'delete-site': deleteSite(siteId, siteName); break;
@@ -169,6 +170,9 @@ function initializeEventListeners() {
             case 'delete-rack-type': deleteRackType(typeName); break;
             case 'add-type-to-site': addRackTypeToSite(typeName); break;
             case 'remove-type-from-site': removeRackTypeFromSite(parseInt(index)); break;
+            case 'open-brand-assignment': handleOpenBrandAssignmentModal(typeName); break;
+            case 'assign-brand': handleBrandAssignmentChange(typeName, brand, 'add'); break;
+            case 'unassign-brand': handleBrandAssignmentChange(typeName, brand, 'remove'); break;
         }
     });
     
@@ -438,6 +442,7 @@ async function runSlottingProcess() {
             existingBackroom,
             settings: {
                 siteRackLayout: appState.siteRackLayout,
+                rackTypeLibrary: appState.rackTypeLibrary,
                 excludeRacks: getEl('excludeRacks').value,
                 includeKids: getEl('includeKids').checked,
             },
@@ -899,7 +904,7 @@ function handleAddOrEditRackType() {
                 return;
             }
 
-            appState.rackTypeLibrary.push({ name, sectionsPerRack: sections, stacksPerSection: stacks, slotsPerStack: slots });
+            appState.rackTypeLibrary.push({ name, sectionsPerRack: sections, stacksPerSection: stacks, slotsPerStack: slots, assignedBrands: [] });
             await saveDataToFirestore('configs/rackTypeLibrary', { types: appState.rackTypeLibrary });
             renderRackTypeLibrary();
             showToast(`Rack type "${name}" created.`, "success");
@@ -923,13 +928,7 @@ async function deleteRackType(typeName) {
 function addRackTypeToSite(typeName) {
     const type = appState.rackTypeLibrary.find(t => t.name === typeName);
     if (type) {
-        appState.siteRackLayout.push({
-            typeName: type.name,
-            quantity: 1,
-            sectionsPerRack: type.sectionsPerRack,
-            stacksPerSection: type.stacksPerSection,
-            slotsPerStack: type.slotsPerStack
-        });
+        appState.siteRackLayout.push({ ...type, quantity: 1 });
         renderSiteRackLayout();
     }
 }
@@ -965,7 +964,6 @@ async function saveRackConfiguration() {
         appState.siteRackLayout = newLayout;
         await saveDataToFirestore(`sites/${appState.selectedSiteId}/configs/rackConfiguration`, { layout: appState.siteRackLayout });
 
-        // If racks were removed, find and unslot items from the removed racks
         if (newTotalRacks < oldTotalRacks) {
             const itemsToUnslot = {};
             const batch = writeBatch(db);
@@ -999,9 +997,37 @@ async function saveRackConfiguration() {
             confirmAndSave
         );
     } else {
-        appState.siteRackLayout = newLayout; // Update state immediately for reordering
+        appState.siteRackLayout = newLayout;
         await confirmAndSave();
     }
+}
+
+function handleOpenBrandAssignmentModal(typeName) {
+    const allBrands = new Set();
+    appState.rawInventoryFiles.forEach(file => allBrands.add(toTitleCase(file.name.replace(/\s*\d*\.csv$/i, '').trim())));
+    appState.rawPOFiles.forEach(file => allBrands.add(toTitleCase(file.name.replace(/\s*\d*\.csv$/i, '').trim())));
+    Object.values(appState.finalSlottedData).forEach(item => allBrands.add(item.Brand));
+    
+    renderBrandAssignmentModal(typeName, Array.from(allBrands).sort());
+    getEl('brand-assignment-modal').classList.add('visible');
+}
+
+async function handleBrandAssignmentChange(typeName, brand, action) {
+    const rackType = appState.rackTypeLibrary.find(t => t.name === typeName);
+    if (!rackType) return;
+
+    if (!rackType.assignedBrands) rackType.assignedBrands = [];
+
+    if (action === 'add' && !rackType.assignedBrands.includes(brand)) {
+        rackType.assignedBrands.push(brand);
+    } else if (action === 'remove') {
+        rackType.assignedBrands = rackType.assignedBrands.filter(b => b !== brand);
+    }
+    
+    await saveDataToFirestore('configs/rackTypeLibrary', { types: appState.rackTypeLibrary });
+    renderRackTypeLibrary();
+    renderSiteRackLayout();
+    renderBrandAssignmentModal(typeName, []); // Re-render the modal
 }
 
 

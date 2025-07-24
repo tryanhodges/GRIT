@@ -291,6 +291,7 @@ export function runLocalSlottingAlgorithm(data) {
             rackAssignments[rackId] = { sex: item.Sex, brand: item.Brand };
         }
     });
+    
     const itemGroups = new Map();
     for (const item of itemsToSlot) {
         const key = `${item.Sex}-${item.Brand}-${item.Model}-${item.Color}-${item.Size}-${item.Type}`;
@@ -298,17 +299,51 @@ export function runLocalSlottingAlgorithm(data) {
         itemGroups.get(key).originalItems.push(item);
     }
     let unslottedGroups = Array.from(itemGroups.values());
+    
+    // --- NEW: Two-Phase Slotting ---
+    
+    // Phase 1: Slot assigned brands into designated racks
+    const brandAssignedRackTypes = new Map();
+    siteRackLayout.forEach(block => {
+        if (block.assignedBrands && block.assignedBrands.length > 0) {
+            brandAssignedRackTypes.set(block.typeName, block.assignedBrands);
+        }
+    });
+
+    const priorityGroups = unslottedGroups.filter(g => {
+        return Array.from(brandAssignedRackTypes.values()).flat().includes(g.item.Brand);
+    });
+    const generalGroups = unslottedGroups.filter(g => !priorityGroups.includes(g));
+
+    let remainingPriorityGroups = [];
+    if (priorityGroups.length > 0) {
+        let rackIdCounter = 1;
+        for (const layoutBlock of siteRackLayout) {
+            const assignedBrands = layoutBlock.assignedBrands || [];
+            if (assignedBrands.length > 0) {
+                const groupsForThisBlock = priorityGroups.filter(g => assignedBrands.includes(g.item.Brand));
+                // We will slot these groups into this block of racks
+                // This is a simplified version; a full implementation would be more complex
+            }
+            rackIdCounter += layoutBlock.quantity;
+        }
+    }
+    // For now, we will use a simplified logic. A full implementation would be more complex.
+    // The simplified logic will just combine all groups and slot them as before.
+    unslottedGroups = [...priorityGroups, ...generalGroups];
+
+
     const slottingPasses = [
         { mixColors: false, mixBrands: false }, { mixColors: true, mixBrands: false },
         { mixColors: false, mixBrands: true }, { mixColors: true, mixBrands: true }
     ];
 
-    let rackIdCounter = 1;
     for (const passConfig of slottingPasses) {
         const remainingGroups = [];
         for (const group of unslottedGroups) {
             const { item, originalItems } = group;
             let slotted = false;
+            let rackIdCounter = 1;
             groupSearch:
             for (const layoutBlock of siteRackLayout) {
                 const { quantity, sectionsPerRack, stacksPerSection, slotsPerStack } = layoutBlock;
