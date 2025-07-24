@@ -841,14 +841,21 @@ export function renderRackTypeLibrary() {
     container.innerHTML = '';
     if (appState.rackTypeLibrary.length === 0) {
         container.innerHTML = '<p class="text-gray-500 text-center py-4">No rack types created yet.</p>';
+        return;
     }
     appState.rackTypeLibrary.forEach(type => {
         const card = document.createElement('div');
         card.className = 'rack-type-card';
+        const assignedBrands = type.assignedBrands || [];
+        const brandTags = assignedBrands.map(b => `<span class="brand-tag">${b}</span>`).join('');
+
         card.innerHTML = `
             <div class="flex justify-between items-center">
                 <span class="font-bold text-gray-800">${type.name}</span>
-                <div class="flex gap-2">
+                <div class="flex gap-2 items-center">
+                    <button data-action="open-brand-assignment" data-type-name="${type.name}" class="text-gray-500 hover:text-indigo-600" title="Assign Brands">
+                        <span class="material-symbols-outlined">sell</span>
+                    </button>
                     <button data-action="add-type-to-site" data-type-name="${type.name}" class="text-indigo-600 hover:text-indigo-800" title="Add to Site Layout">
                         <span class="material-symbols-outlined">add_circle</span>
                     </button>
@@ -858,6 +865,7 @@ export function renderRackTypeLibrary() {
                 </div>
             </div>
             <p class="text-sm text-gray-600 mt-1">${type.sectionsPerRack}s, ${type.stacksPerSection}st, ${type.slotsPerStack}sl</p>
+            <div class="brand-tag-container">${brandTags}</div>
         `;
         container.appendChild(card);
     });
@@ -881,6 +889,8 @@ export function renderSiteRackLayout() {
 
         const rackEndNumber = rackStartNumber + layoutBlock.quantity - 1;
         const rackRange = layoutBlock.quantity > 0 ? `(Racks ${rackStartNumber}-${rackEndNumber})` : '';
+        const assignedBrands = layoutBlock.assignedBrands || [];
+        const brandTags = assignedBrands.map(b => `<span class="brand-tag">${b}</span>`).join('');
 
         item.innerHTML = `
             <span class="material-symbols-outlined drag-handle">drag_indicator</span>
@@ -891,6 +901,7 @@ export function renderSiteRackLayout() {
                     <input type="number" value="${layoutBlock.quantity}" min="1" class="w-20 border-gray-300 rounded-md shadow-sm text-sm" data-action="update-layout-quantity" data-index="${index}">
                     <span class="text-xs text-gray-500">${rackRange}</span>
                 </div>
+                <div class="brand-tag-container">${brandTags}</div>
             </div>
             <button data-action="remove-type-from-site" data-index="${index}" class="text-red-500 hover:text-red-700" title="Remove from Layout">
                 <span class="material-symbols-outlined">remove_circle</span>
@@ -902,4 +913,46 @@ export function renderSiteRackLayout() {
     });
 
     getEl('total-racks-display').textContent = totalRacks;
+}
+
+export function renderBrandAssignmentModal(typeName, allBrands) {
+    getEl('brand-assignment-title').innerHTML = `Brand Assignments for <span class="text-indigo-600">${typeName}</span>`;
+    
+    const rackType = appState.rackTypeLibrary.find(t => t.name === typeName);
+    const assignedBrands = new Set(rackType?.assignedBrands || []);
+    
+    const availableList = getEl('available-brands-list');
+    const assignedList = getEl('assigned-brands-list');
+    availableList.innerHTML = '';
+    assignedList.innerHTML = '';
+
+    const availableBrands = allBrands.filter(b => !assignedBrands.has(b));
+
+    if (availableBrands.length === 0) {
+        availableList.innerHTML = '<p class="text-gray-500 p-2">No other brands to assign.</p>';
+    } else {
+        availableBrands.forEach(brand => {
+            const el = document.createElement('div');
+            el.className = 'flex justify-between items-center p-2 rounded hover:bg-gray-100';
+            el.innerHTML = `
+                <span>${brand}</span>
+                <button data-action="assign-brand" data-type-name="${typeName}" data-brand="${brand}" class="btn btn-secondary btn-xs py-1 px-2 text-xs">Add</button>
+            `;
+            availableList.appendChild(el);
+        });
+    }
+
+    if (assignedBrands.size === 0) {
+        assignedList.innerHTML = '<p class="text-gray-500 p-2">No brands assigned.</p>';
+    } else {
+        assignedBrands.forEach(brand => {
+            const el = document.createElement('div');
+            el.className = 'flex justify-between items-center p-2 rounded hover:bg-gray-100';
+            el.innerHTML = `
+                <span>${brand}</span>
+                <button data-action="unassign-brand" data-type-name="${typeName}" data-brand="${brand}" class="text-red-500 hover:text-red-700 text-xs">Remove</button>
+            `;
+            assignedList.appendChild(el);
+        });
+    }
 }
