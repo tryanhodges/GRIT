@@ -489,42 +489,57 @@ export function renderCushionUI() {
 export function updateModelAssignmentList() {
     const container = getEl('model-assignment-list');
     container.innerHTML = '';
-    
-    const uniqueModels = appState.allKnownModels.sort();
 
-    if (uniqueModels.length === 0) {
+    const sortedModels = [...appState.allKnownModels].sort((a, b) => {
+        return a.brand.localeCompare(b.brand) || a.model.localeCompare(b.model);
+    });
+
+    if (sortedModels.length === 0) {
         container.innerHTML = '<p class="text-gray-500">No models loaded. Upload an inventory file to begin.</p>';
         return;
     }
 
-    uniqueModels.forEach(model => {
+    sortedModels.forEach(modelObj => {
         const el = document.createElement('div');
-        el.className = 'flex justify-between items-center';
+        el.className = 'flex justify-between items-center gap-4';
         
         const label = document.createElement('label');
-        label.className = 'font-medium text-gray-700';
-        label.textContent = model;
+        label.className = 'font-medium text-gray-700 flex-grow';
+        label.textContent = `${modelObj.brand} - ${modelObj.model}`;
         
         const select = document.createElement('select');
-        select.className = 'border-gray-300 rounded-md shadow-sm w-48 model-assignment-select';
-        select.dataset.model = model;
+        select.className = 'border-gray-300 rounded-md shadow-sm w-40 model-assignment-select';
+        select.dataset.model = modelObj.model; // Key is still just the model name
         select.dataset.action = 'assign-cushion';
         select.innerHTML = '<option value="">Unassigned</option>';
         appState.cushionLevels.forEach(level => {
             const option = document.createElement('option');
             option.value = level;
             option.textContent = level;
-            if (appState.modelCushionAssignments[model] === level) {
+            if (appState.modelCushionAssignments[modelObj.model] === level) {
                 option.selected = true;
             }
             select.appendChild(option);
         });
 
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'text-red-400 hover:text-red-600 font-bold';
+        deleteBtn.innerHTML = '&times;';
+        deleteBtn.dataset.action = 'delete-cushion-model';
+        deleteBtn.dataset.brand = modelObj.brand;
+        deleteBtn.dataset.model = modelObj.model;
+        
+        const controlsWrapper = document.createElement('div');
+        controlsWrapper.className = 'flex items-center gap-2';
+        controlsWrapper.appendChild(select);
+        controlsWrapper.appendChild(deleteBtn);
+
         el.appendChild(label);
-        el.appendChild(select);
+        el.appendChild(controlsWrapper);
         container.appendChild(el);
     });
 }
+
 
 export function renderSiteManagementModal() {
     const container = getEl('site-list-container');

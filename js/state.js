@@ -30,9 +30,9 @@ export const appState = {
     exclusionKeywords: [],
     cushionLevels: [],
     modelCushionAssignments: {},
-    allKnownModels: [], // To store all unique models for cushioning
-    rackTypeLibrary: [], // NEW: Global library of rack type templates
-    siteRackLayout: [], // NEW: The specific layout for the selected site
+    allKnownModels: [], // NEW: Will store objects like { brand: 'On', model: 'Cloud 5' }
+    rackTypeLibrary: [],
+    siteRackLayout: [],
     
     // UI State
     currentView: 'grid',

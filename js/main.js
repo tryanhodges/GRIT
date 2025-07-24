@@ -155,7 +155,7 @@ function initializeEventListeners() {
         if (!actionTarget) return;
         
         const action = actionTarget.dataset.action;
-        const { siteId, siteName, poKey, keyword, rackId, uid, email, level, typeName, index, brand } = actionTarget.dataset;
+        const { siteId, siteName, poKey, keyword, rackId, uid, email, level, typeName, index, brand, model } = actionTarget.dataset;
 
         switch(action) {
             case 'delete-site': deleteSite(siteId, siteName); break;
@@ -173,6 +173,7 @@ function initializeEventListeners() {
             case 'open-brand-assignment': handleOpenBrandAssignmentModal(typeName); break;
             case 'assign-brand': handleBrandAssignmentChange(typeName, brand, 'add'); break;
             case 'unassign-brand': handleBrandAssignmentChange(typeName, brand, 'remove'); break;
+            case 'delete-cushion-model': deleteCushionModel(brand, model); break;
         }
     });
     
@@ -642,7 +643,7 @@ async function handleCushionModelUpload(event) {
 
     setLoading(true, "Parsing models from files...");
     let newModelsFound = 0;
-    const newModelSet = new Set(appState.allKnownModels);
+    const existingModelsSet = new Set(appState.allKnownModels.map(m => `${m.brand}|${m.model}`));
 
     for (const file of files) {
         const brand = toTitleCase(file.name.replace(/\s*\d*\.csv$/i, '').trim());
@@ -658,20 +659,35 @@ async function handleCushionModelUpload(event) {
             const itemString = lines[i][itemIndex];
             if (itemString) {
                 const { Model } = parseItemString(itemString, brand);
-                if (Model !== 'N/A' && !newModelSet.has(Model)) {
-                    newModelSet.add(Model);
+                const modelKey = `${brand}|${Model}`;
+                if (Model !== 'N/A' && !existingModelsSet.has(modelKey)) {
+                    existingModelsSet.add(modelKey);
+                    appState.allKnownModels.push({ brand, model: Model });
                     newModelsFound++;
                 }
             }
         }
     }
 
-    appState.allKnownModels = Array.from(newModelSet);
     await saveCushionData();
     updateModelAssignmentList();
     setLoading(false);
     showToast(`${newModelsFound} new models added to the assignment list.`, 'success');
     getEl('cushionModelFile').value = '';
+}
+
+async function deleteCushionModel(brand, model) {
+    showConfirmationModal(
+        `Delete Model "${brand} - ${model}"?`,
+        'This will permanently remove the model from the assignment list and clear any cushion level assigned to it.',
+        async () => {
+            appState.allKnownModels = appState.allKnownModels.filter(m => !(m.brand === brand && m.model === model));
+            delete appState.modelCushionAssignments[model];
+            await saveCushionData();
+            updateModelAssignmentList();
+            showToast(`Model "${brand} - ${model}" deleted.`, 'success');
+        }
+    );
 }
 
 async function clearCushionData() {
